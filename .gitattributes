@@ -1,0 +1,12 @@
+# Chuan hoa xuong dong: luu LF trong repo, tranh diff gia giua Windows va Linux
+* text=auto eol=lf
+
+# File nhi phan, khong dung cham vao
+*.parquet   binary
+*.png       binary
+*.jpg       binary
+*.joblib    binary
+*.safetensors binary
+*.bin       binary
+*.xz        binary
+*.zip       binary

@@ -1,0 +1,29 @@
+# moi truong
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# du lieu tho va trung gian, qua nang de commit
+data/raw/
+data/interim/*.parquet
+
+# mo hinh da huan luyen. PhoBERT ~540 MB -> day len HuggingFace thay vi git.
+# baseline joblib ~2.6 MB nhung chay lai chi mat 3 phut CPU -> khong can commit.
+models/*
+models/*/
+
+# ...tru dung file du doan tren test, 18 KB. Khong co no thi compare_models.py
+# khong chay duoc sau khi clone tru khi huan luyen lai PhoBERT (20 phut GPU).
+!models/phobert-vnfin/
+models/phobert-vnfin/*
+!models/phobert-vnfin/test_predictions.json
+
+# he dieu hanh
+.DS_Store
+Thumbs.db
+
+# GIU LAI trong git (khong ignore):
+#   data/processed/*.parquet   dataset da chot, 6.8 MB, de repo tu chay duoc
+#   data/interim/*.csv         nhan tay, nhe
+#   data/interim/labeled_auto.jsonl
