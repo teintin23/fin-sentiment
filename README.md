@@ -53,6 +53,7 @@ src/                      code
   compare_models.py       so sánh 2 mô hình + McNemar + phân tích lỗi
   fetch_prices.py         tải giá đóng cửa (vnstock 4.x) cho event study
   event_study.py          event study Brown & Warner, có kiểm tra giả dược
+  daily_alert.py          bot email hàng ngày: tin mới + sentiment, ưu tiên watchlist
   build_docs.py           sinh README và các card từ số liệu thật
 data/
   raw/                    dữ liệu thô (không commit)
@@ -79,6 +80,7 @@ models/                   mô hình đã huấn luyện (không commit)
 | 10. So sánh | `src/compare_models.py` | `docs/model_comparison.md` |
 | 11. Tải giá | `src/fetch_prices.py` | `data/prices/*.csv` |
 | 12. Event study | `src/event_study.py` | `docs/event_study.md` |
+| 13. Bot cảnh báo tin | `src/daily_alert.py` | email hàng ngày |
 
 ## Chạy lại từ đầu
 

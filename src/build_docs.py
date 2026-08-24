@@ -154,6 +154,7 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("  compare_models.py       so sánh 2 mô hình + McNemar + phân tích lỗi")
     a("  fetch_prices.py         tải giá đóng cửa (vnstock 4.x) cho event study")
     a("  event_study.py          event study Brown & Warner, có kiểm tra giả dược")
+    a("  daily_alert.py          bot email hàng ngày: tin mới + sentiment, ưu tiên watchlist")
     a("  build_docs.py           sinh README và các card từ số liệu thật")
     a("data/")
     a("  raw/                    dữ liệu thô (không commit)")
@@ -179,6 +180,7 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("| 10. So sánh | `src/compare_models.py` | `docs/model_comparison.md` |")
     a("| 11. Tải giá | `src/fetch_prices.py` | `data/prices/*.csv` |")
     a("| 12. Event study | `src/event_study.py` | `docs/event_study.md` |")
+    a("| 13. Bot cảnh báo tin | `src/daily_alert.py` | email hàng ngày |")
     a("")
 
     a("## Chạy lại từ đầu\n")

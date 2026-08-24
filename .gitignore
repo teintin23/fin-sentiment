@@ -27,3 +27,8 @@ Thumbs.db
 #   data/processed/*.parquet   dataset da chot, 6.8 MB, de repo tu chay duoc
 #   data/interim/*.csv         nhan tay, nhe
 #   data/interim/labeled_auto.jsonl
+
+# bot canh bao — chua mat khau, khong commit
+config/alert.json
+data/alert_state.json
+reports/alert_*.html
