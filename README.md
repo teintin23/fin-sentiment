@@ -10,7 +10,8 @@ Bộ dữ liệu và mô hình phân loại sentiment tin tức tài chính ti�
 | macro-F1 PhoBERT fine-tuned | **0.7948** |
 | McNemar p-value giữa hai mô hình | 1.331e-02 (khác biệt có ý nghĩa) |
 | Cohen's kappa nhãn máy vs nhãn người | 0.5505 |
-| Event study, POS−NEG CAR[0,5] | +1.884% (p=1.6e-05, 3,616 sự kiện; p bị thổi phồng do chồng lấn, xem `docs/event_study.md`) |
+| Event study, POS−NEG CAR[0,0] | +0.972% (p=4.3e-08, 3,616 sự kiện) |
+| — chỉ sự kiện không chồng lấn | +1.321% (p=0.0003, 663 sự kiện), hiệu ứng tại phiên tin ra không phải artifact |
 
 ![CM PhoBERT](reports/figures/cm_phobert.png)
 
@@ -94,6 +95,7 @@ python src/train_phobert.py        # ~20 phút trên GPU T4
 python src/compare_models.py
 python src/fetch_prices.py         # giá đóng cửa 195 mã + VNINDEX, 3-5 phút
 python src/event_study.py          # sentiment vs lợi suất bất thường
+python src/event_study.py --no-overlap          # biến thể sạch, bỏ sự kiện chồng lấn
 python src/build_docs.py           # sinh lại README và các card
 ```
 
@@ -124,7 +126,7 @@ python src/build_docs.py           # sinh lại README và các card
 - Độ chính xác gán `primary_ticker` ước tính khoảng 85% (audit tay 30 mẫu).
 - Khoảng thời gian ngắn, cuối 2024 đến giữa 2026, chưa qua đủ một chu kỳ thị trường.
 - Mô hình chỉ đọc tiêu đề và đoạn dẫn, không đọc toàn văn.
-- **Event study đã chạy nhưng p-value bị thổi phồng** vì phần lớn sự kiện chồng lấn cùng mã. Kiểm tra giả dược và bốn khả năng gây nhiễu ở `docs/event_study.md`, mục 6-8. Chưa đủ cơ sở dự báo giá.
+- **Event study: nhãn tương quan đúng chiều và đơn điệu với lợi suất bất thường** (POS > NEUTRAL ≈ 0 > NEG ở mọi cửa sổ), giữ nguyên khi chỉ dùng sự kiện không chồng lấn và khi đổi sang market-adjusted. Nhưng **giả dược [-5,-1] dương ở nhóm POSITIVE kể cả trên mẫu không chồng lấn**: một phần tín hiệu đã nằm trong giá trước ngày đăng — báo viết tin tốt về mã đang tăng. Dữ liệu chứng minh nhãn phản ánh thông tin giá, chưa chứng minh tin dự báo giá. Chi tiết `docs/event_study.md` mục 6-8.
 - Không dùng cho quyết định đầu tư thật.
 
 ## Giấy phép

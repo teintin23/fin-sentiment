@@ -48,16 +48,22 @@ def main() -> int:
     pval = grab(DOCS / "model_comparison.md", r"p-value = \*\*([0-9.e\-]+)")
 
     # event study (neu da chay)
-    es = DOCS / "event_study.md"
-    es_car = es_p = es_n = None
-    if es.exists():
-        txt = es.read_text(encoding="utf-8")
-        m = re.search(r"\| \[0,5\] \| ([+\-][0-9.]+) \| [\-0-9.]+ \| ([0-9.e\-]+) \|", txt)
+    def grab_es(path):
+        if not path.exists():
+            return None
+        txt = path.read_text(encoding="utf-8")
+        car = pv = n = None
+        m = re.search(r"\| \[0,0\] \| ([+\-][0-9.]+) \| [\-0-9.]+ \| ([0-9.e\-]+) \|", txt)
         if m:
-            es_car, es_p = m.group(1), m.group(2)
+            car, pv = m.group(1), m.group(2)
         m = re.search(r"Sự kiện dùng được\*\* \| \*\*([\d,]+)", txt)
         if m:
-            es_n = m.group(1)
+            n = m.group(1)
+        return (car, pv, n) if car else None
+
+    es_main = grab_es(DOCS / "event_study.md")
+    es_iso = grab_es(DOCS / "event_study_no_overlap.md")
+    es_car, es_p, es_n = es_main if es_main else (None, None, None)
 
     def row(n: str, d: pd.DataFrame) -> dict:
         vc = d["label"].value_counts()
@@ -70,7 +76,7 @@ def main() -> int:
 
     ctx = dict(kappa=kappa, base_f1=base_f1, pho_f1=pho_f1, pval=pval,
                tbl=tbl, src=src, full=full, splits=splits,
-               es_car=es_car, es_p=es_p, es_n=es_n)
+               es_car=es_car, es_p=es_p, es_n=es_n, es_iso=es_iso)
 
     write_readme(**ctx)
     ctx2 = {k: v for k, v in ctx.items() if not k.startswith('es_')}
@@ -90,7 +96,7 @@ def main() -> int:
 
 # ---------------------------------------------------------------- README ---
 def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
-                 es_car=None, es_p=None, es_n=None) -> None:
+                 es_car=None, es_p=None, es_n=None, es_iso=None) -> None:
     w = []
     a = w.append
     a("# vn-fin-sentiment\n")
@@ -107,8 +113,10 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a(f"| McNemar p-value giữa hai mô hình | {pval} (khác biệt có ý nghĩa) |")
     a(f"| Cohen's kappa nhãn máy vs nhãn người | {kappa} |")
     if es_car:
-        a(f"| Event study, POS−NEG CAR[0,5] | {es_car}% (p={es_p}, {es_n} sự kiện; "
-          "p bị thổi phồng do chồng lấn, xem `docs/event_study.md`) |")
+        a(f"| Event study, POS−NEG CAR[0,0] | {es_car}% (p={es_p}, {es_n} sự kiện) |")
+        if es_iso:
+            a(f"| — chỉ sự kiện không chồng lấn | {es_iso[0]}% (p={es_iso[1]}, "
+              f"{es_iso[2]} sự kiện), hiệu ứng tại phiên tin ra không phải artifact |")
     else:
         a("| Event study | chưa chạy, xem mục Hạn chế |")
     a("")
@@ -187,6 +195,7 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("python src/compare_models.py")
     a("python src/fetch_prices.py         # giá đóng cửa 195 mã + VNINDEX, 3-5 phút")
     a("python src/event_study.py          # sentiment vs lợi suất bất thường")
+    a("python src/event_study.py --no-overlap          # biến thể sạch, bỏ sự kiện chồng lấn")
     a("python src/build_docs.py           # sinh lại README và các card")
     a("```\n")
 
@@ -230,9 +239,14 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("- Khoảng thời gian ngắn, cuối 2024 đến giữa 2026, chưa qua đủ một chu kỳ thị trường.")
     a("- Mô hình chỉ đọc tiêu đề và đoạn dẫn, không đọc toàn văn.")
     if es_car:
-        a("- **Event study đã chạy nhưng p-value bị thổi phồng** vì phần lớn sự "
-          "kiện chồng lấn cùng mã. Kiểm tra giả dược và bốn khả năng gây nhiễu "
-          "ở `docs/event_study.md`, mục 6-8. Chưa đủ cơ sở dự báo giá.")
+        a("- **Event study: nhãn tương quan đúng chiều và đơn điệu với lợi suất "
+          "bất thường** (POS > NEUTRAL ≈ 0 > NEG ở mọi cửa sổ), giữ nguyên khi "
+          "chỉ dùng sự kiện không chồng lấn và khi đổi sang market-adjusted. "
+          "Nhưng **giả dược [-5,-1] dương ở nhóm POSITIVE kể cả trên mẫu không "
+          "chồng lấn**: một phần tín hiệu đã nằm trong giá trước ngày đăng — "
+          "báo viết tin tốt về mã đang tăng. Dữ liệu chứng minh nhãn phản ánh "
+          "thông tin giá, chưa chứng minh tin dự báo giá. Chi tiết "
+          "`docs/event_study.md` mục 6-8.")
     else:
         a("- **Event study chưa chạy.** Cần dữ liệu giá cổ phiếu và VNINDEX theo ngày, "
           "chưa thu thập. Mọi kết luận về khả năng dự báo giá đều chưa có cơ sở.")

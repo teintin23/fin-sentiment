@@ -193,6 +193,23 @@ def welch(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float, int, int]:
     return float(a.mean() - b.mean()), float(t), float(p), len(a), len(b)
 
 
+def isolated_mask(ev: pd.DataFrame, cal: pd.DatetimeIndex, gap: int = 10) -> np.ndarray:
+    """True cho su kien KHONG co su kien khac cung ma trong +/-gap phien."""
+    pos_of = {d: i for i, d in enumerate(cal)}
+    ok = np.ones(len(ev), dtype=bool)
+    for tk, g in ev.groupby("ticker"):
+        idx = g.index.to_numpy()
+        ps = np.array([pos_of[t] for t in g["t0"]])
+        order = np.argsort(ps)
+        idx, ps = idx[order], ps[order]
+        for k in range(len(ps)):
+            near = (k > 0 and ps[k] - ps[k-1] <= gap) or \
+                   (k < len(ps)-1 and ps[k+1] - ps[k] <= gap)
+            if near:
+                ok[np.where(ev.index == idx[k])[0][0]] = False
+    return ok
+
+
 def overlap_share(ev: pd.DataFrame, cal: pd.DatetimeIndex, gap: int = 10) -> float:
     """Ti le su kien co su kien khac cung ma trong vong +/-gap phien."""
     pos_of = {d: i for i, d in enumerate(cal)}
@@ -214,7 +231,7 @@ def fmt_p(p: float) -> str:
 
 
 def run(price_dir: Path, out_md: Path, out_png: Path,
-        model: str, source: str) -> dict:
+        model: str, source: str, no_overlap: bool = False) -> dict:
     full = pd.read_parquet(PROC / "dataset_full.parquet")
     px, cal = load_prices(price_dir)
     ret = log_returns(px)
@@ -224,6 +241,10 @@ def run(price_dir: Path, out_md: Path, out_png: Path,
     ret = ret.drop(columns=["VNINDEX"])
 
     ev0 = build_events(full, ret, cal, source)
+    n_before_iso = len(ev0)
+    if no_overlap:
+        ev0 = ev0[isolated_mask(ev0, cal)].reset_index(drop=True)
+        ev0.attrs["dropped_conflict"] = 0
     ev, ar, st_ = compute_ars(ev0, ret, rm, cal, model)
     if len(ev) < 30:
         print(f"CANH BAO: chi {len(ev)} su kien dung duoc - qua it de ket luan.")
@@ -263,13 +284,16 @@ def run(price_dir: Path, out_md: Path, out_png: Path,
     w_ = []
     a = w_.append
     a("# Event study — sentiment và lợi suất bất thường\n")
-    a(f"Mô hình: `{model}` | Nguồn nhãn: `{source}` | "
-      f"Cửa sổ ước lượng: [{EST_START},{EST_END}] phiên, tối thiểu {MIN_EST} quan sát\n")
+    a(f"Mô hình: `{model}` | Nguồn nhãn: `{source}`"
+      + (" | **chỉ sự kiện không chồng lấn (±10 phiên)**" if no_overlap else "")
+      + f" | Cửa sổ ước lượng: [{EST_START},{EST_END}] phiên, tối thiểu {MIN_EST} quan sát\n")
 
     a("## 1. Mẫu sự kiện\n")
     a("| | |")
     a("|---|---|")
     a(f"| Bài gốc khớp mã có giá | {len(ev0) + ev0.attrs['dropped_conflict']:,} sự kiện (đã gộp cùng mã cùng phiên) |")
+    if no_overlap:
+        a(f"| Bỏ vì chồng lấn ±10 phiên | {n_before_iso - len(ev0):,} |")
     a(f"| Bỏ vì nhãn xung đột cùng phiên | {ev0.attrs['dropped_conflict']} |")
     a(f"| Bỏ vì thiếu dữ liệu ước lượng | {st_['n_short_est']} |")
     a(f"| **Sự kiện dùng được** | **{len(ev):,}** |")
@@ -326,9 +350,14 @@ def run(price_dir: Path, out_md: Path, out_png: Path,
     a("")
 
     a("## 7. Chồng lấn sự kiện\n")
-    a(f"**{ov*100:.0f}%** sự kiện có sự kiện khác cùng mã trong vòng ±10 "
-      "phiên. AR của tin trước tràn vào cửa sổ của tin sau, các quan sát "
-      "không độc lập.\n")
+    if no_overlap:
+        a("Mẫu đã lọc chỉ giữ sự kiện không có sự kiện khác cùng mã trong "
+          f"±10 phiên (còn lại {ov*100:.0f}% chồng lấn — theo thiết kế là 0). "
+          "Đây là biến thể sạch để đối chiếu với kết quả chính.\n")
+    else:
+        a(f"**{ov*100:.0f}%** sự kiện có sự kiện khác cùng mã trong vòng ±10 "
+          "phiên. AR của tin trước tràn vào cửa sổ của tin sau, các quan sát "
+          "không độc lập.\n")
 
     a("## 8. Hạn chế và cách đọc p-value\n")
     a("- Vì chồng lấn ở mục 7, **t-statistic bị thổi phồng, p-value thật lớn "
@@ -443,6 +472,8 @@ def main() -> int:
     ap.add_argument("--model", choices=["market_model", "market_adjusted"],
                     default="market_model")
     ap.add_argument("--source", choices=["all", "manual", "human"], default="all")
+    ap.add_argument("--no-overlap", action="store_true",
+                    help="chi giu su kien khong co su kien khac cung ma trong ±10 phien")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
@@ -454,11 +485,13 @@ def main() -> int:
         parts.append(args.model)
     if args.source != "all":
         parts.append(args.source)
+    if args.no_overlap:
+        parts.append("no_overlap")
     suffix = "_" + "_".join(parts) if parts else ""
     run(PRICES,
         DOCS / f"event_study{suffix}.md",
         FIGS / f"event_study_caar{suffix}.png",
-        model=args.model, source=args.source)
+        model=args.model, source=args.source, no_overlap=args.no_overlap)
     return 0
 
 
