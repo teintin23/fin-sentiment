@@ -47,6 +47,18 @@ def main() -> int:
     pho_f1 = grab(DOCS / "model_phobert.md", r"macro-F1 \| \*\*([01]\.\d+)")
     pval = grab(DOCS / "model_comparison.md", r"p-value = \*\*([0-9.e\-]+)")
 
+    # event study (neu da chay)
+    es = DOCS / "event_study.md"
+    es_car = es_p = es_n = None
+    if es.exists():
+        txt = es.read_text(encoding="utf-8")
+        m = re.search(r"\| \[0,5\] \| ([+\-][0-9.]+) \| [\-0-9.]+ \| ([0-9.e\-]+) \|", txt)
+        if m:
+            es_car, es_p = m.group(1), m.group(2)
+        m = re.search(r"Sự kiện dùng được\*\* \| \*\*([\d,]+)", txt)
+        if m:
+            es_n = m.group(1)
+
     def row(n: str, d: pd.DataFrame) -> dict:
         vc = d["label"].value_counts()
         return {"split": n, "n": len(d),
@@ -57,11 +69,13 @@ def main() -> int:
     src = full["source_detail"].value_counts().to_dict()
 
     ctx = dict(kappa=kappa, base_f1=base_f1, pho_f1=pho_f1, pval=pval,
-               tbl=tbl, src=src, full=full, splits=splits)
+               tbl=tbl, src=src, full=full, splits=splits,
+               es_car=es_car, es_p=es_p, es_n=es_n)
 
     write_readme(**ctx)
-    write_dataset_card(**ctx)
-    write_model_card(**ctx)
+    ctx2 = {k: v for k, v in ctx.items() if not k.startswith('es_')}
+    write_dataset_card(**ctx2)
+    write_model_card(**ctx2)
 
     # --- kiem tra duong dan trong README -----------------------------------
     bad = []
@@ -75,7 +89,8 @@ def main() -> int:
 
 
 # ---------------------------------------------------------------- README ---
-def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits) -> None:
+def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
+                 es_car=None, es_p=None, es_n=None) -> None:
     w = []
     a = w.append
     a("# vn-fin-sentiment\n")
@@ -91,7 +106,11 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits) -> None:
     a(f"| macro-F1 PhoBERT fine-tuned | **{pho_f1}** |")
     a(f"| McNemar p-value giữa hai mô hình | {pval} (khác biệt có ý nghĩa) |")
     a(f"| Cohen's kappa nhãn máy vs nhãn người | {kappa} |")
-    a("| Event study | chưa chạy, xem mục Hạn chế |")
+    if es_car:
+        a(f"| Event study, POS−NEG CAR[0,5] | {es_car}% (p={es_p}, {es_n} sự kiện; "
+          "p bị thổi phồng do chồng lấn, xem `docs/event_study.md`) |")
+    else:
+        a("| Event study | chưa chạy, xem mục Hạn chế |")
     a("")
 
     a("![CM PhoBERT](reports/figures/cm_phobert.png)\n")
@@ -125,6 +144,8 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits) -> None:
     a("  train_baseline.py       TF-IDF + Logistic Regression")
     a("  train_phobert.py        fine-tune vinai/phobert-base")
     a("  compare_models.py       so sánh 2 mô hình + McNemar + phân tích lỗi")
+    a("  fetch_prices.py         tải giá đóng cửa (vnstock 4.x) cho event study")
+    a("  event_study.py          event study Brown & Warner, có kiểm tra giả dược")
     a("  build_docs.py           sinh README và các card từ số liệu thật")
     a("data/")
     a("  raw/                    dữ liệu thô (không commit)")
@@ -148,6 +169,8 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits) -> None:
     a("| 8. Baseline | `src/train_baseline.py` | `docs/model_baseline.md` |")
     a("| 9. PhoBERT | `src/train_phobert.py` | `docs/model_phobert.md` |")
     a("| 10. So sánh | `src/compare_models.py` | `docs/model_comparison.md` |")
+    a("| 11. Tải giá | `src/fetch_prices.py` | `data/prices/*.csv` |")
+    a("| 12. Event study | `src/event_study.py` | `docs/event_study.md` |")
     a("")
 
     a("## Chạy lại từ đầu\n")
@@ -162,6 +185,8 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits) -> None:
     a("python src/train_baseline.py       # ~3 phút trên CPU")
     a("python src/train_phobert.py        # ~20 phút trên GPU T4")
     a("python src/compare_models.py")
+    a("python src/fetch_prices.py         # giá đóng cửa 195 mã + VNINDEX, 3-5 phút")
+    a("python src/event_study.py          # sentiment vs lợi suất bất thường")
     a("python src/build_docs.py           # sinh lại README và các card")
     a("```\n")
 
@@ -204,8 +229,13 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits) -> None:
     a("- Độ chính xác gán `primary_ticker` ước tính khoảng 85% (audit tay 30 mẫu).")
     a("- Khoảng thời gian ngắn, cuối 2024 đến giữa 2026, chưa qua đủ một chu kỳ thị trường.")
     a("- Mô hình chỉ đọc tiêu đề và đoạn dẫn, không đọc toàn văn.")
-    a("- **Event study chưa chạy.** Cần dữ liệu giá cổ phiếu và VNINDEX theo ngày, "
-      "chưa thu thập. Mọi kết luận về khả năng dự báo giá đều chưa có cơ sở.")
+    if es_car:
+        a("- **Event study đã chạy nhưng p-value bị thổi phồng** vì phần lớn sự "
+          "kiện chồng lấn cùng mã. Kiểm tra giả dược và bốn khả năng gây nhiễu "
+          "ở `docs/event_study.md`, mục 6-8. Chưa đủ cơ sở dự báo giá.")
+    else:
+        a("- **Event study chưa chạy.** Cần dữ liệu giá cổ phiếu và VNINDEX theo ngày, "
+          "chưa thu thập. Mọi kết luận về khả năng dự báo giá đều chưa có cơ sở.")
     a("- Không dùng cho quyết định đầu tư thật.")
     a("")
     a("## Giấy phép\n")

@@ -10,7 +10,7 @@ Bộ dữ liệu và mô hình phân loại sentiment tin tức tài chính ti�
 | macro-F1 PhoBERT fine-tuned | **0.7948** |
 | McNemar p-value giữa hai mô hình | 1.331e-02 (khác biệt có ý nghĩa) |
 | Cohen's kappa nhãn máy vs nhãn người | 0.5505 |
-| Event study | chưa chạy, xem mục Hạn chế |
+| Event study, POS−NEG CAR[0,5] | +1.884% (p=1.6e-05, 3,616 sự kiện; p bị thổi phồng do chồng lấn, xem `docs/event_study.md`) |
 
 ![CM PhoBERT](reports/figures/cm_phobert.png)
 
@@ -50,6 +50,8 @@ src/                      code
   train_baseline.py       TF-IDF + Logistic Regression
   train_phobert.py        fine-tune vinai/phobert-base
   compare_models.py       so sánh 2 mô hình + McNemar + phân tích lỗi
+  fetch_prices.py         tải giá đóng cửa (vnstock 4.x) cho event study
+  event_study.py          event study Brown & Warner, có kiểm tra giả dược
   build_docs.py           sinh README và các card từ số liệu thật
 data/
   raw/                    dữ liệu thô (không commit)
@@ -74,6 +76,8 @@ models/                   mô hình đã huấn luyện (không commit)
 | 8. Baseline | `src/train_baseline.py` | `docs/model_baseline.md` |
 | 9. PhoBERT | `src/train_phobert.py` | `docs/model_phobert.md` |
 | 10. So sánh | `src/compare_models.py` | `docs/model_comparison.md` |
+| 11. Tải giá | `src/fetch_prices.py` | `data/prices/*.csv` |
+| 12. Event study | `src/event_study.py` | `docs/event_study.md` |
 
 ## Chạy lại từ đầu
 
@@ -88,6 +92,8 @@ python src/finalize_dataset.py     # chia train/val/test theo thời gian
 python src/train_baseline.py       # ~3 phút trên CPU
 python src/train_phobert.py        # ~20 phút trên GPU T4
 python src/compare_models.py
+python src/fetch_prices.py         # giá đóng cửa 195 mã + VNINDEX, 3-5 phút
+python src/event_study.py          # sentiment vs lợi suất bất thường
 python src/build_docs.py           # sinh lại README và các card
 ```
 
@@ -118,7 +124,7 @@ python src/build_docs.py           # sinh lại README và các card
 - Độ chính xác gán `primary_ticker` ước tính khoảng 85% (audit tay 30 mẫu).
 - Khoảng thời gian ngắn, cuối 2024 đến giữa 2026, chưa qua đủ một chu kỳ thị trường.
 - Mô hình chỉ đọc tiêu đề và đoạn dẫn, không đọc toàn văn.
-- **Event study chưa chạy.** Cần dữ liệu giá cổ phiếu và VNINDEX theo ngày, chưa thu thập. Mọi kết luận về khả năng dự báo giá đều chưa có cơ sở.
+- **Event study đã chạy nhưng p-value bị thổi phồng** vì phần lớn sự kiện chồng lấn cùng mã. Kiểm tra giả dược và bốn khả năng gây nhiễu ở `docs/event_study.md`, mục 6-8. Chưa đủ cơ sở dự báo giá.
 - Không dùng cho quyết định đầu tư thật.
 
 ## Giấy phép
