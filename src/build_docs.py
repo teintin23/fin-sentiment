@@ -103,7 +103,16 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("Bộ dữ liệu và mô hình phân loại sentiment tin tức tài chính tiếng Việt, gán "
       "nhãn theo góc nhìn nhà đầu tư đang nắm giữ mã cổ phiếu được nhắc tới. "
       f"Gồm {len(full):,} bài từ CafeF, hai mô hình đối chứng, và một khung event "
-      "study để kiểm tra xem sentiment có dự báo được biến động giá hay không.\n")
+      "study kiểm tra quan hệ giữa sentiment và lợi suất bất thường, có kiểm soát "
+      "momentum trước sự kiện.\n")
+    a("> **TL;DR (EN).** Vietnamese financial news sentiment dataset "
+      f"({len(full):,} CafeF articles, holder-perspective labels, 3 label-source tiers) "
+      "with a TF-IDF baseline and a fine-tuned PhoBERT, evaluated on a strictly "
+      "chronological, fully hand-labeled test set. An event study finds a "
+      "significant announcement-day abnormal-return spread between positive and "
+      "negative news that survives controls for pre-event momentum, and no "
+      "post-announcement drift: the labels carry priced information but no "
+      "tradable forecast.\n")
 
     a("## Kết quả chính\n")
     a("| Hạng mục | Giá trị |")
@@ -117,6 +126,10 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
         if es_iso:
             a(f"| — chỉ sự kiện không chồng lấn | {es_iso[0]}% (p={es_iso[1]}, "
               f"{es_iso[2]} sự kiện), hiệu ứng tại phiên tin ra không phải artifact |")
+        a("| — kiểm soát momentum (CAR ~ POS+NEG+preCAR[-5,-1]) | POS−NEG [0,0] "
+          "+0.905% (p=3.5e-07); mẫu không chồng lấn +1.329% (p=0.0002) |")
+        a("| — dự báo sau tin, CAR[1,5] | POS−NEG không có ý nghĩa (p=0.12) — "
+          "không có drift sau phiên tin ra |")
     else:
         a("| Event study | chưa chạy, xem mục Hạn chế |")
     a("")
@@ -154,7 +167,7 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("  compare_models.py       so sánh 2 mô hình + McNemar + phân tích lỗi")
     a("  fetch_prices.py         tải giá đóng cửa (vnstock 4.x) cho event study")
     a("  event_study.py          event study Brown & Warner, có kiểm tra giả dược")
-    a("  daily_alert.py          bot email hàng ngày: tin mới + sentiment, ưu tiên watchlist")
+    a("  event_study_momentum.py event study có kiểm soát momentum trước sự kiện\n  daily_alert.py          (phụ) bot email tin mới + sentiment")
     a("  build_docs.py           sinh README và các card từ số liệu thật")
     a("data/")
     a("  raw/                    dữ liệu thô (không commit)")
@@ -180,7 +193,7 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("| 10. So sánh | `src/compare_models.py` | `docs/model_comparison.md` |")
     a("| 11. Tải giá | `src/fetch_prices.py` | `data/prices/*.csv` |")
     a("| 12. Event study | `src/event_study.py` | `docs/event_study.md` |")
-    a("| 13. Bot cảnh báo tin | `src/daily_alert.py` | email hàng ngày |")
+    a("| 13. Kiểm soát momentum | `src/event_study_momentum.py` | `docs/event_study_momentum.md` |")
     a("")
 
     a("## Chạy lại từ đầu\n")
@@ -198,6 +211,7 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("python src/fetch_prices.py         # giá đóng cửa 195 mã + VNINDEX, 3-5 phút")
     a("python src/event_study.py          # sentiment vs lợi suất bất thường")
     a("python src/event_study.py --no-overlap          # biến thể sạch, bỏ sự kiện chồng lấn")
+    a("python src/event_study_momentum.py # hồi quy có kiểm soát momentum + post-drift")
     a("python src/build_docs.py           # sinh lại README và các card")
     a("```\n")
 
@@ -241,14 +255,16 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("- Khoảng thời gian ngắn, cuối 2024 đến giữa 2026, chưa qua đủ một chu kỳ thị trường.")
     a("- Mô hình chỉ đọc tiêu đề và đoạn dẫn, không đọc toàn văn.")
     if es_car:
-        a("- **Event study: nhãn tương quan đúng chiều và đơn điệu với lợi suất "
-          "bất thường** (POS > NEUTRAL ≈ 0 > NEG ở mọi cửa sổ), giữ nguyên khi "
-          "chỉ dùng sự kiện không chồng lấn và khi đổi sang market-adjusted. "
-          "Nhưng **giả dược [-5,-1] dương ở nhóm POSITIVE kể cả trên mẫu không "
-          "chồng lấn**: một phần tín hiệu đã nằm trong giá trước ngày đăng — "
-          "báo viết tin tốt về mã đang tăng. Dữ liệu chứng minh nhãn phản ánh "
-          "thông tin giá, chưa chứng minh tin dự báo giá. Chi tiết "
-          "`docs/event_study.md` mục 6-8.")
+        a("- **Event study: có nội sinh, đã định lượng và kiểm soát.** Giả dược "
+          "[-5,-1] dương ở nhóm POSITIVE (+0.84%, p=7.4e-05): báo có xu hướng viết "
+          "tin tốt về mã đang tăng. Sau khi kiểm soát pre-drift bằng hồi quy, "
+          "POS−NEG tại phiên tin ra vẫn +0.905% (p=3.5e-07); trên mẫu không chồng "
+          "lấn +1.329% (p=0.0002) — hiệu ứng đồng thời không phải artifact "
+          "momentum. Kiểm tra phi tham số trên tercile |preCAR| thấp cùng chiều "
+          "nhưng thiếu lực thống kê (n nhỏ). CAR[1,5] không có ý nghĩa: nhãn phản "
+          "ánh thông tin được định giá ngay tại phiên, **không có sức dự báo sau "
+          "tin**. Chi tiết `docs/event_study.md` mục 6-8 và "
+          "`docs/event_study_momentum.md`.")
     else:
         a("- **Event study chưa chạy.** Cần dữ liệu giá cổ phiếu và VNINDEX theo ngày, "
           "chưa thu thập. Mọi kết luận về khả năng dự báo giá đều chưa có cơ sở.")
