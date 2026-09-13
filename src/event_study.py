@@ -1,30 +1,3 @@
-"""
-event_study.py
---------------
-Event study theo Brown & Warner (1985) / MacKinlay (1997): kiem tra xem nhan
-sentiment cua bai bao co di kem loi suat bat thuong (abnormal return) quanh
-ngay dang tin hay khong.
-
-Phuong phap:
-- Mo hinh thi truong 1 nhan to: R_i = a + b*R_m + e, uoc luong OLS tren cua so
-  t-130 .. t-11 (toi thieu 60 quan sat). AR = R_i - (a + b*R_m).
-- Bien the --model market_adjusted: AR = R_i - R_m, khong hoi quy.
-- Ngay su kien t0: tin dang sau 15:00 hoac vao ngay nghi -> phien giao dich
-  ke tiep.
-- Kiem dinh t cat ngang (cross-sectional) tren CAR tung nhom nhan; Welch t
-  cho chenh lech POSITIVE - NEGATIVE.
-- Cua so gia duoc [-5,-1] nam hoan toan truoc tin: neu khac 0 co y nghia thi
-  ket qua dang bi nhiem (tin chong lan / ro ri truoc).
-
-Dau ra: docs/event_study.md, reports/figures/event_study_caar.png
-
-Usage:
-    python src/event_study.py
-    python src/event_study.py --model market_adjusted
-    python src/event_study.py --source human
-    python src/event_study.py --selftest      # kiem chung bang gia gia lap
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -44,20 +17,18 @@ DOCS = ROOT / "docs"
 FIGS = ROOT / "reports" / "figures"
 
 LABELS = ["POSITIVE", "NEUTRAL", "NEGATIVE"]
-EST_START, EST_END = -130, -11        # cua so uoc luong (phien)
-MIN_EST = 60                          # so quan sat toi thieu de hoi quy
+EST_START, EST_END = -130, -11
+MIN_EST = 60
 WINDOWS = [(0, 0), (0, 1), (0, 3), (0, 5), (-1, 1)]
 PLACEBO = (-5, -1)
 PLOT_RANGE = (-10, 10)
-NEWS_CUTOFF_HOUR = 15                 # tin sau gio nay tinh vao phien sau
+NEWS_CUTOFF_HOUR = 15
 
 
-# ------------------------------------------------------------- du lieu ----
 def load_prices(price_dir: Path) -> tuple[pd.DataFrame, pd.DatetimeIndex]:
-    """Ma tran gia dong cua (ngay x ma) tren lich giao dich cua VNINDEX."""
     idx_path = price_dir / "VNINDEX.csv"
     if not idx_path.exists():
-        sys.exit("Thieu data/prices/VNINDEX.csv - chay src/fetch_prices.py truoc.")
+        sys.exit("Missing data/prices/VNINDEX.csv - run src/fetch_prices.py first.")
     cal = pd.to_datetime(pd.read_csv(idx_path)["time"]).sort_values()
     cal = pd.DatetimeIndex(cal.unique())
 
@@ -78,7 +49,6 @@ def log_returns(px: pd.DataFrame) -> pd.DataFrame:
 
 
 def map_t0(dt: pd.Timestamp, cal: pd.DatetimeIndex) -> pd.Timestamp | None:
-    """Ngay su kien: phien giao dich dau tien ma tin co the tac dong."""
     d = dt.normalize()
     if dt.hour >= NEWS_CUTOFF_HOUR:
         d = d + pd.Timedelta(days=1)
@@ -102,7 +72,6 @@ def build_events(full: pd.DataFrame, ret: pd.DataFrame,
         rows.append((r["primary_ticker"], t0, r["label"]))
     ev = pd.DataFrame(rows, columns=["ticker", "t0", "label"])
 
-    # gop: cung ma + cung phien -> 1 su kien; nhan xung dot thi bo
     def agg(g: pd.DataFrame):
         labs = set(g["label"])
         return None if len(labs) > 1 else labs.pop()
@@ -116,11 +85,9 @@ def build_events(full: pd.DataFrame, ret: pd.DataFrame,
     return ev
 
 
-# ---------------------------------------------------------------- loi ----
 def compute_ars(ev: pd.DataFrame, ret: pd.DataFrame, rm: pd.Series,
                 cal: pd.DatetimeIndex, model: str
                 ) -> tuple[pd.DataFrame, np.ndarray, dict]:
-    """AR tung su kien tren luoi phien PLOT_RANGE. Tra ve (events, ar_matrix, stats)."""
     lo, hi = PLOT_RANGE
     days = np.arange(lo, hi + 1)
     pos_of = {d: i for i, d in enumerate(cal)}
@@ -131,7 +98,6 @@ def compute_ars(ev: pd.DataFrame, ret: pd.DataFrame, rm: pd.Series,
         ri = ret[r["ticker"]]
         p0 = pos_of[r["t0"]]
 
-        # uoc luong
         e_lo, e_hi = p0 + EST_START, p0 + EST_END
         if e_lo < 0:
             n_short_est += 1
@@ -144,10 +110,9 @@ def compute_ars(ev: pd.DataFrame, ret: pd.DataFrame, rm: pd.Series,
             continue
         if model == "market_model":
             b, a_ = np.polyfit(x[m].values, y[m].values, 1)
-        else:  # market_adjusted
+        else:
             a_, b = 0.0, 1.0
 
-        # AR tren luoi phien
         row = np.full(len(days), np.nan)
         for j, d in enumerate(days):
             p = p0 + d
@@ -156,7 +121,7 @@ def compute_ars(ev: pd.DataFrame, ret: pd.DataFrame, rm: pd.Series,
                 if np.isfinite(yi) and np.isfinite(xi):
                     row[j] = yi - (a_ + b * xi)
         if np.isnan(row[days.tolist().index(0)]):
-            continue  # thieu chinh phien t0 thi bo
+            continue
         keep.append(i)
         mats.append(row)
 
@@ -174,7 +139,6 @@ def car(ar: np.ndarray, w: tuple[int, int]) -> np.ndarray:
 
 
 def tstat(x: np.ndarray) -> tuple[float, float, float, int]:
-    """(mean, t, p, n) cat ngang."""
     from scipy import stats as st
     x = x[np.isfinite(x)]
     n = len(x)
@@ -194,7 +158,6 @@ def welch(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float, int, int]:
 
 
 def isolated_mask(ev: pd.DataFrame, cal: pd.DatetimeIndex, gap: int = 10) -> np.ndarray:
-    """True cho su kien KHONG co su kien khac cung ma trong +/-gap phien."""
     pos_of = {d: i for i, d in enumerate(cal)}
     ok = np.ones(len(ev), dtype=bool)
     for tk, g in ev.groupby("ticker"):
@@ -211,7 +174,6 @@ def isolated_mask(ev: pd.DataFrame, cal: pd.DatetimeIndex, gap: int = 10) -> np.
 
 
 def overlap_share(ev: pd.DataFrame, cal: pd.DatetimeIndex, gap: int = 10) -> float:
-    """Ti le su kien co su kien khac cung ma trong vong +/-gap phien."""
     pos_of = {d: i for i, d in enumerate(cal)}
     n_ov = 0
     for tk, g in ev.groupby("ticker"):
@@ -223,7 +185,6 @@ def overlap_share(ev: pd.DataFrame, cal: pd.DatetimeIndex, gap: int = 10) -> flo
     return n_ov / len(ev) if len(ev) else np.nan
 
 
-# --------------------------------------------------------------- bao cao --
 def fmt_p(p: float) -> str:
     if not np.isfinite(p):
         return "-"
@@ -236,7 +197,7 @@ def run(price_dir: Path, out_md: Path, out_png: Path,
     px, cal = load_prices(price_dir)
     ret = log_returns(px)
     if "VNINDEX" not in ret.columns:
-        sys.exit("Thieu VNINDEX trong du lieu gia.")
+        sys.exit("Missing VNINDEX in price data.")
     rm = ret["VNINDEX"]
     ret = ret.drop(columns=["VNINDEX"])
 
@@ -247,136 +208,128 @@ def run(price_dir: Path, out_md: Path, out_png: Path,
         ev0.attrs["dropped_conflict"] = 0
     ev, ar, st_ = compute_ars(ev0, ret, rm, cal, model)
     if len(ev) < 30:
-        print(f"CANH BAO: chi {len(ev)} su kien dung duoc - qua it de ket luan.")
+        print(f"WARNING: only {len(ev)} usable events — too few for reliable conclusions.")
 
     ov = overlap_share(ev, cal)
     lab_mask = {l: (ev["label"] == l).values for l in LABELS}
 
-    # bang CAAR theo nhom x cua so
     rows_grp = []
     for w in WINDOWS + [PLACEBO]:
         c = car(ar, w)
         for l in LABELS:
             mu, t, p, n = tstat(c[lab_mask[l]])
-            rows_grp.append({"cua_so": f"[{w[0]},{w[1]}]", "nhom": l,
+            rows_grp.append({"window": f"[{w[0]},{w[1]}]", "group": l,
                              "n": n, "CAAR_%": mu * 100 if np.isfinite(mu) else np.nan,
                              "t": t, "p": p})
     grp = pd.DataFrame(rows_grp)
 
-    # chenh lech POS - NEG
     rows_diff = []
     for w in WINDOWS + [PLACEBO]:
         c = car(ar, w)
         d, t, p, na, nb = welch(c[lab_mask["POSITIVE"]], c[lab_mask["NEGATIVE"]])
-        rows_diff.append({"cua_so": f"[{w[0]},{w[1]}]",
+        rows_diff.append({"window": f"[{w[0]},{w[1]}]",
                           "POS-NEG_%": d * 100 if np.isfinite(d) else np.nan,
                           "t": t, "p": p, "n_POS": na, "n_NEG": nb})
     diff = pd.DataFrame(rows_diff)
 
-    # placebo rieng
-    plc = grp[grp["cua_so"] == f"[{PLACEBO[0]},{PLACEBO[1]}]"].copy()
-    plc_diff = diff[diff["cua_so"] == f"[{PLACEBO[0]},{PLACEBO[1]}]"].iloc[0]
+    plc = grp[grp["window"] == f"[{PLACEBO[0]},{PLACEBO[1]}]"].copy()
+    plc_diff = diff[diff["window"] == f"[{PLACEBO[0]},{PLACEBO[1]}]"].iloc[0]
 
-    # bieu do CAAR theo ngay
     plot_caar(ar, lab_mask, out_png)
 
-    # ---- markdown ----
     w_ = []
     a = w_.append
-    a("# Event study — sentiment và lợi suất bất thường\n")
-    a(f"Mô hình: `{model}` | Nguồn nhãn: `{source}`"
-      + (" | **chỉ sự kiện không chồng lấn (±10 phiên)**" if no_overlap else "")
-      + f" | Cửa sổ ước lượng: [{EST_START},{EST_END}] phiên, tối thiểu {MIN_EST} quan sát\n")
+    a("# Event study — sentiment and abnormal returns\n")
+    a(f"Model: `{model}` | Label source: `{source}`"
+      + (" | **non-overlapping events only (±10 sessions)**" if no_overlap else "")
+      + f" | Estimation window: [{EST_START},{EST_END}] sessions, min {MIN_EST} observations\n")
 
-    a("## 1. Mẫu sự kiện\n")
+    a("## 1. Event sample\n")
     a("| | |")
     a("|---|---|")
-    a(f"| Bài gốc khớp mã có giá | {len(ev0) + ev0.attrs['dropped_conflict']:,} sự kiện (đã gộp cùng mã cùng phiên) |")
+    a(f"| Source articles matched to priced ticker | {len(ev0) + ev0.attrs['dropped_conflict']:,} events (merged same ticker same session) |")
     if no_overlap:
-        a(f"| Bỏ vì chồng lấn ±10 phiên | {n_before_iso - len(ev0):,} |")
-    a(f"| Bỏ vì nhãn xung đột cùng phiên | {ev0.attrs['dropped_conflict']} |")
-    a(f"| Bỏ vì thiếu dữ liệu ước lượng | {st_['n_short_est']} |")
-    a(f"| **Sự kiện dùng được** | **{len(ev):,}** |")
+        a(f"| Dropped: overlapping ±10 sessions | {n_before_iso - len(ev0):,} |")
+    a(f"| Dropped: conflicting labels same session | {ev0.attrs['dropped_conflict']} |")
+    a(f"| Dropped: insufficient estimation data | {st_['n_short_est']} |")
+    a(f"| **Usable events** | **{len(ev):,}** |")
     for l in LABELS:
         a(f"| — {l} | {int(lab_mask[l].sum()):,} |")
     a("")
 
-    a("## 2. Phương pháp\n")
+    a("## 2. Methodology\n")
     a("Brown & Warner (1985), MacKinlay (1997). "
-      + ("Mô hình thị trường một nhân tố ước lượng OLS trên cửa sổ "
-         f"[{EST_START},{EST_END}] phiên trước sự kiện, AR = R − (α + βR_m)."
+      + ("Market model OLS estimated on window "
+         f"[{EST_START},{EST_END}] sessions before event, AR = R − (α + βR_m)."
          if model == "market_model" else
-         "Market-adjusted: AR = R − R_m, không hồi quy.")
-      + " Tin đăng sau 15:00 hoặc ngày nghỉ tính vào phiên kế tiếp. "
-        "Kiểm định t cắt ngang trên CAR.\n")
+         "Market-adjusted: AR = R − R_m, no regression.")
+      + " News published after 15:00 or on non-trading days assigned to next session. "
+        "Cross-sectional t-test on CAR.\n")
 
-    a("## 3. CAAR theo nhóm nhãn\n")
-    a("| Cửa sổ | Nhóm | n | CAAR % | t | p |")
+    a("## 3. CAAR by label group\n")
+    a("| Window | Group | n | CAAR % | t | p |")
     a("|---|---|---|---|---|---|")
-    for _, r in grp[grp["cua_so"] != f"[{PLACEBO[0]},{PLACEBO[1]}]"].iterrows():
-        a(f"| {r['cua_so']} | {r['nhom']} | {r['n']} | {r['CAAR_%']:+.3f} "
+    for _, r in grp[grp["window"] != f"[{PLACEBO[0]},{PLACEBO[1]}]"].iterrows():
+        a(f"| {r['window']} | {r['group']} | {r['n']} | {r['CAAR_%']:+.3f} "
           f"| {r['t']:.2f} | {fmt_p(r['p'])} |")
     a("")
 
-    a("## 4. Chênh lệch POSITIVE − NEGATIVE\n")
-    a("Đây là bảng chính: nếu nhãn có giá trị thông tin thì chênh lệch phải "
-      "dương ở các cửa sổ chứa t=0.\n")
-    a("| Cửa sổ | POS−NEG % | t (Welch) | p | n POS | n NEG |")
+    a("## 4. POSITIVE − NEGATIVE spread\n")
+    a("Main table: if labels carry information, the spread should be positive in windows containing t=0.\n")
+    a("| Window | POS-NEG % | t (Welch) | p | n POS | n NEG |")
     a("|---|---|---|---|---|---|")
-    for _, r in diff[diff["cua_so"] != f"[{PLACEBO[0]},{PLACEBO[1]}]"].iterrows():
-        a(f"| {r['cua_so']} | {r['POS-NEG_%']:+.3f} | {r['t']:.2f} "
+    for _, r in diff[diff["window"] != f"[{PLACEBO[0]},{PLACEBO[1]}]"].iterrows():
+        a(f"| {r['window']} | {r['POS-NEG_%']:+.3f} | {r['t']:.2f} "
           f"| {fmt_p(r['p'])} | {r['n_POS']} | {r['n_NEG']} |")
     a("")
 
-    a("## 5. CAAR theo ngày\n")
+    a("## 5. CAAR over time\n")
     try:
         rel = out_png.relative_to(ROOT).as_posix()
     except ValueError:
         rel = out_png.name
     a(f"![CAAR]({rel})\n")
 
-    a("## 6. Kiểm tra giả dược — cửa sổ [-5,-1]\n")
-    a("Cửa sổ nằm hoàn toàn trước ngày tin, lẽ ra phải bằng 0. Khác 0 có ý "
-      "nghĩa nghĩa là kết quả bị nhiễm (sự kiện chồng lấn hoặc thị trường "
-      "phản ứng trước).\n")
-    a("| Nhóm | n | CAAR % | t | p |")
+    a("## 6. Placebo check — window [-5,-1]\n")
+    a("Window lies entirely before the announcement day and should be zero. "
+      "A significant non-zero result indicates contamination (event clustering or pre-event leakage).\n")
+    a("| Group | n | CAAR % | t | p |")
     a("|---|---|---|---|---|")
     for _, r in plc.iterrows():
-        a(f"| {r['nhom']} | {r['n']} | {r['CAAR_%']:+.3f} | {r['t']:.2f} "
+        a(f"| {r['group']} | {r['n']} | {r['CAAR_%']:+.3f} | {r['t']:.2f} "
           f"| {fmt_p(r['p'])} |")
-    a(f"| POS−NEG | {plc_diff['n_POS']}/{plc_diff['n_NEG']} "
+    a(f"| POS-NEG | {plc_diff['n_POS']}/{plc_diff['n_NEG']} "
       f"| {plc_diff['POS-NEG_%']:+.3f} | {plc_diff['t']:.2f} "
       f"| {fmt_p(plc_diff['p'])} |")
     a("")
 
-    a("## 7. Chồng lấn sự kiện\n")
+    a("## 7. Event clustering\n")
     if no_overlap:
-        a("Mẫu đã lọc chỉ giữ sự kiện không có sự kiện khác cùng mã trong "
-          f"±10 phiên (còn lại {ov*100:.0f}% chồng lấn — theo thiết kế là 0). "
-          "Đây là biến thể sạch để đối chiếu với kết quả chính.\n")
+        a("Sample filtered to keep only events with no other event for the same ticker within "
+          f"±10 sessions (remaining overlap: {ov*100:.0f}% by design = 0). "
+          "This is the clean variant for robustness comparison.\n")
     else:
-        a(f"**{ov*100:.0f}%** sự kiện có sự kiện khác cùng mã trong vòng ±10 "
-          "phiên. AR của tin trước tràn vào cửa sổ của tin sau, các quan sát "
-          "không độc lập.\n")
+        a(f"**{ov*100:.0f}%** of events have another event for the same ticker within ±10 "
+          "sessions. ARs from preceding articles contaminate the window of subsequent ones; "
+          "observations are not independent.\n")
 
-    a("## 8. Hạn chế và cách đọc p-value\n")
-    a("- Vì chồng lấn ở mục 7, **t-statistic bị thổi phồng, p-value thật lớn "
-      "hơn con số in ra**. Đừng đọc `p < 0.05` ở đây như một thí nghiệm sạch.")
-    a("- Nếu kết quả không có ý nghĩa, bốn khả năng chưa loại trừ được:")
-    a("  1. Nhãn quá nhiễu (kappa 0.55, đa số là nhãn lan truyền)")
-    a("  2. Gán mã sai ~15%")
-    a("  3. Thị trường phản ứng trước khi tin lên báo")
-    a("  4. Cỡ mẫu chưa đủ, nhất là nhóm NEGATIVE")
+    a("## 8. Limitations and p-value interpretation\n")
+    a("- Due to clustering in section 7, **t-statistics are inflated; true p-values are larger "
+      "than printed**. Do not read `p < 0.05` here as a clean experiment.")
+    a("- If results are not significant, four alternative explanations remain:")
+    a("  1. Labels too noisy (kappa 0.55, mostly propagated labels)")
+    a("  2. Ticker misassignment ~15%")
+    a("  3. Market prices in news before publication")
+    a("  4. Insufficient sample size, especially for NEGATIVE group")
     a("")
 
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text("\n".join(w_) + "\n", encoding="utf-8")
-    print(f"Ghi {out_md} va {out_png}")
+    print(f"Written {out_md} and {out_png}")
 
-    # in nhanh ra console
-    key = diff[diff["cua_so"] == "[0,5]"].iloc[0]
+    key = diff[diff["window"] == "[0,5]"].iloc[0]
     print(f"POS-NEG CAR[0,5] = {key['POS-NEG_%']:+.3f}%  "
-          f"t={key['t']:.2f}  p={fmt_p(key['p'])}  (doc muc 6 va 8 truoc khi tin)")
+          f"t={key['t']:.2f}  p={fmt_p(key['p'])}  (read sections 6 and 8 before concluding)")
     return {"grp": grp, "diff": diff, "n_events": len(ev), "overlap": ov}
 
 
@@ -395,9 +348,9 @@ def plot_caar(ar: np.ndarray, lab_mask: dict, out_png: Path) -> None:
                 color=colors[l], lw=1.8)
     ax.axvline(0, color="k", lw=0.7, ls="--")
     ax.axhline(0, color="k", lw=0.5)
-    ax.set_xlabel("Phiên so với ngày tin (t=0)")
+    ax.set_xlabel("Session relative to announcement day (t=0)")
     ax.set_ylabel("CAAR (%)")
-    ax.set_title("CAAR quanh ngày đăng tin, theo nhãn sentiment")
+    ax.set_title("CAAR around announcement day by sentiment label")
     ax.legend()
     fig.tight_layout()
     out_png.parent.mkdir(parents=True, exist_ok=True)
@@ -405,10 +358,7 @@ def plot_caar(ar: np.ndarray, lab_mask: dict, out_png: Path) -> None:
     plt.close(fig)
 
 
-# -------------------------------------------------------------- selftest --
 def selftest(model: str) -> int:
-    """Gia lap gia co cay tin hieu: POSITIVE +1.2%, NEGATIVE -1.5% tai t=0.
-    Neu pipeline dung, CAAR[0,0] phai thu lai duoc xap xi cac con so nay."""
     import tempfile
 
     rng = np.random.default_rng(7)
@@ -427,7 +377,6 @@ def selftest(model: str) -> int:
         r = 0.9 * rm + rng.normal(0, 0.012, len(cal))
         rets[tk] = r
 
-    # cay tin hieu tai t0 cua tung su kien that
     plant = {"POSITIVE": 0.012, "NEGATIVE": -0.015, "NEUTRAL": 0.0}
     cal_idx = pd.DatetimeIndex(cal)
     pos_of = {d: i for i, d in enumerate(cal_idx)}
@@ -452,18 +401,18 @@ def selftest(model: str) -> int:
                   model=model, source="all")
 
     g = res["grp"]
-    got = {l: g[(g["cua_so"] == "[0,0]") & (g["nhom"] == l)]["CAAR_%"].iloc[0]
+    got = {l: g[(g["window"] == "[0,0]") & (g["group"] == l)]["CAAR_%"].iloc[0]
            for l in LABELS}
-    print("\nSELFTEST — tin hieu cay vs thu lai (CAAR[0,0] %):")
+    print("\nSELFTEST — planted signal vs recovered CAAR[0,0] %:")
     ok = True
     for l, want in [("POSITIVE", 1.2), ("NEGATIVE", -1.5), ("NEUTRAL", 0.0)]:
         tol = 0.35
         good = abs(got[l] - want) < tol
         ok &= good
-        print(f"  {l:9s} cay {want:+.1f}  thu {got[l]:+.3f}  "
-              f"{'OK' if good else 'LECH'}")
-    print(f"  chong lan: {res['overlap']*100:.0f}% (ky vong cao — xem muc 7/8)")
-    print("PASS" if ok else "LOI")
+        print(f"  {l:9s} planted {want:+.1f}  recovered {got[l]:+.3f}  "
+              f"{'OK' if good else 'DEVIATION'}")
+    print(f"  overlap: {res['overlap']*100:.0f}% (expected high — see sections 7/8)")
+    print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
 
@@ -473,7 +422,7 @@ def main() -> int:
                     default="market_model")
     ap.add_argument("--source", choices=["all", "manual", "human"], default="all")
     ap.add_argument("--no-overlap", action="store_true",
-                    help="chi giu su kien khong co su kien khac cung ma trong ±10 phien")
+                    help="keep only events with no other event for same ticker within ±10 sessions")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 

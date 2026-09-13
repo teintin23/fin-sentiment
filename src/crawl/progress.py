@@ -1,4 +1,3 @@
-"""progress.py – Xem tiến độ crawl đang chạy (an toàn với file đang ghi)."""
 import json
 from pathlib import Path
 
@@ -20,10 +19,10 @@ if OUTPUT.exists():
                 has_ticker += 1
 
 pct = has_ticker / total * 100 if total else 0.0
-print(f"articles.jsonl  : {total:>7,} dòng")
-print(f"có tickers_any  : {has_ticker:>7,} bài  ({pct:.1f}%)")
-print(f"chưa có ticker  : {total - has_ticker:>7,} bài")
+print(f"articles.jsonl  : {total:>7,} rows")
+print(f"with tickers    : {has_ticker:>7,} ({pct:.1f}%)")
+print(f"without ticker  : {total - has_ticker:>7,}")
 if total >= 18000:
-    print("PASS: >= 18000 dòng ✓")
+    print("PASS: >= 18000 rows")
 else:
-    print(f"Cần thêm        : {max(0, 18000 - total):>7,} dòng để PASS")
+    print(f"Need            : {max(0, 18000 - total):>7,} more rows to PASS")

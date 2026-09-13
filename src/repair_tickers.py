@@ -1,32 +1,3 @@
-"""
-repair_tickers.py
------------------
-Sua loi gan primary_ticker trong articles_clean.parquet.
-
-Van de o pipeline cu:
-  1. primary_ticker = phan tu dau tien cua list DA SORT alphabet
-     -> ['HPA','HPG'] cho bai ve Hoa Phat -> chon HPA (sai)
-  2. tickers_by_name dung `alias in scan` (substring, khong word boundary)
-     -> alias 'Nam A' khop 'Viet Nam A...' -> gan NAB cho bai khong lien quan
-  3. tickers_explicit khong loai duoc VND (tien te) khoi VND (VNDirect)
-  4. Bai roundup thi truong (ty gia, gia vang, lich chot quyen, khoi ngoai)
-     van bi gan 1 ma ngau nhien
-  5. text = title + sapo, KHONG chua ticker, nhung nhan lai dinh nghia theo ticker
-
-Cach sua: cham diem tung ma ung vien theo vi tri xuat hien
-(title > sapo > body) + tin hieu widget, roi chon ma diem cao nhat
-voi nguong toi thieu va bien do tach biet.
-
-Output:
-  data/interim/articles_scored.parquet   -- toan bo, kem cot chan doan
-  data/interim/to_label_v2.parquet       -- tap gan nhan moi
-  data/interim/gold_seed_v2.csv          -- gold seed moi (giu lai nhan cu neu ticker khong doi)
-  docs/ticker_repair_report.md           -- bao cao
-
-Usage:
-    python src/repair_tickers.py
-"""
-
 from __future__ import annotations
 
 import io
@@ -57,85 +28,35 @@ TOTAL_TARGET = 6000
 MAX_PER_TICKER = 120
 GOLD_SIZE = 200
 
-MIN_SCORE = 55      # diem toi thieu de chap nhan primary_ticker
-MIN_MARGIN = 15     # bien do so voi ma xep thu 2
+MIN_SCORE = 55
+MIN_MARGIN = 15
 
-# ---------------------------------------------------------------------------
-# Blacklist ma 3 chu cai trung voi tu viet tat thong dung
-# ---------------------------------------------------------------------------
 CODE_BLACKLIST = {
-    # goc
     "USD", "GDP", "CEO", "FDI", "HSX", "ETF", "IPO", "EPS", "ROE", "ROA",
     "CPI", "FED", "ECB", "COO", "CFO", "CTO", "TPP", "WTO", "VAT", "BOT",
     "PPP", "GMT", "USA", "PMI", "NIM", "CAR", "ESG", "SME", "CCP", "VKS",
     "TOP", "MTV", "KKT", "KCN", "SJC", "ATM", "POS", "API",
-    # bo sung
-    "HNX", "UPC", "GTV", "TTC", "HĐQT", "NHNN", "TCT", "CTG_",  # placeholder-safe
-    "MWG_",
+    "HNX", "UPC", "GTV", "TTC",
     "EUR", "JPY", "CNY", "KRW", "THB", "SGD", "AUD", "GBP", "HKD", "TWD",
-    "BOJ", "PBOC", "IMF", "ADB", "WEF", "OPE", "OPEC", "GMC_",
+    "BOJ", "PBOC", "IMF", "ADB", "WEF", "OPEC",
     "LNG", "LPG", "CNG", "EVN", "TKV", "PVN", "SCIC", "VEC",
-    "FTA", "EVF_", "RCE", "CPT", "ODA", "NPL", "ROI", "IRR", "NPV",
-    "AGM", "EGM", "MOU", "LOI", "JVC_", "MNA",
+    "FTA", "ODA", "NPL", "ROI", "IRR", "NPV",
+    "AGM", "EGM", "MOU", "LOI",
     "SMS", "OTP", "KYC", "AML", "PIN", "NFC", "GPS", "USB", "PDF",
-    "TVC", "PGD", "CTV", "NVL_",
-    "UBN", "UBC", "SSC", "VSD", "VSC_",
-    "HCM", "TPH", "HAN", "DAN", "CTP_",
+    "TVC", "PGD",
+    "UBN", "UBC", "SSC", "VSD",
+    "HCM", "TPH", "HAN", "DAN",
     "COD", "FOB", "CIF", "TEU", "MWH", "KWH", "GWH",
-    "AIG_",
 }
-CODE_BLACKLIST = {c for c in CODE_BLACKLIST if not c.endswith("_")}
 
-# Ma co nghia khac trong tieng Viet -> chi nhan khi co alias cong ty di kem
 NEEDS_NAME_CONFIRM = {
-    "VND",  # dong Viet Nam
-    "GAS",  # khi dot chung
-    "PAN",  # tien to
-    "TIN",
-    "CAN",
-    "BAN",
-    "TAN",
-    "SAM",
-    "NAM",
-    "HAI",
-    "MAI",
-    "LAN",
-    "VAN",
-    "CAP",
-    "ATA",
-    "ART",
-    "TOP",
-    "NET",
-    "ONE",
-    "SEA",
-    "PET",
-    "PIN",
-    "PHP",
-    "SGD",
-    "ITA",
-    "ASP",
-    "APP",
-    "ACE",
-    "AME",
-    "AMP",
-    "ADC",
-    "BOT",
-    "MAC",
-    "MEC",
-    "MHC",
-    "TET",
-    "TVB",
-    "SIP",
-    "SAV",
-    "SGN",
-    "VAT",
-    "VIP",
-    "VLC",
-    "VNM_",
+    "VND", "GAS", "PAN", "TIN", "CAN", "BAN", "TAN", "SAM", "NAM", "HAI",
+    "MAI", "LAN", "VAN", "CAP", "ATA", "ART", "TOP", "NET", "ONE", "SEA",
+    "PET", "PHP", "SGD", "ITA", "ASP", "APP", "ACE", "AME", "AMP", "ADC",
+    "BOT", "MAC", "MEC", "MHC", "TET", "TVB", "SIP", "SAV", "SGN", "VAT",
+    "VIP", "VLC",
 }
-NEEDS_NAME_CONFIRM = {c for c in NEEDS_NAME_CONFIRM if not c.endswith("_")}
 
-# Alias chung chung, bo di vi qua de khop nham
 GENERIC_ALIASES = {
     "nam a", "hop nhat", "tien bo", "thanh cong", "phat trien", "dau tu",
     "xay dung", "thuong mai", "dich vu", "san xuat", "viet nam", "ha noi",
@@ -147,7 +68,6 @@ GENERIC_ALIASES = {
     "dong a", "tay do", "hai phong", "da nang", "can tho", "vinh long",
 }
 
-# Bai roundup / thi truong chung -> khong nen gan cho 1 ma
 ROUNDUP_PATTERNS = [
     r"t[iy]̉? ?gi[áa]", r"gi[áa] ?USD", r"USD ng[âa]n h[àa]ng",
     r"gi[áa] ?v[àa]ng", r"v[àa]ng nh[ẫa]n", r"v[àa]ng mi[ếe]ng",
@@ -164,7 +84,6 @@ ROUNDUP_PATTERNS = [
 ]
 ROUNDUP_RE = re.compile("|".join(ROUNDUP_PATTERNS), re.IGNORECASE)
 
-# Advertorial / PR
 AD_PATTERNS = [
     r"[đd][ồo]ng h[àa]nh c[ùu]ng", r"tri [âa]n kh[áa]ch h[àa]ng",
     r"[ưu]u [đd][ãa]i (l[ơớ]n|h[ấa]p d[ẫa]n|[đd][ặa]c bi[ệe]t)",
@@ -183,7 +102,6 @@ WS = re.compile(r"\s+")
 
 
 def fold(s: str) -> str:
-    """Bo dau tieng Viet, ha chu thuong, gom khoang trang."""
     if not isinstance(s, str):
         return ""
     s = s.replace("đ", "d").replace("Đ", "D")
@@ -193,9 +111,6 @@ def fold(s: str) -> str:
     return WS.sub(" ", s).strip()
 
 
-# ---------------------------------------------------------------------------
-# Load
-# ---------------------------------------------------------------------------
 print("=" * 68)
 print("Loading ...")
 df = pd.read_parquet(IN_FILE)
@@ -210,7 +125,6 @@ print(f"  ticker universe: {len(whitelist):,}")
 
 raw_names = json.loads(NAMES_FILE.read_text(encoding="utf-8"))
 
-# Build alias table: folded alias -> ticker, only aliases that are specific enough
 alias_map: dict[str, str] = {}
 dropped_alias = 0
 for code, aliases in raw_names.items():
@@ -221,7 +135,6 @@ for code, aliases in raw_names.items():
         if len(fa) < 6 or fa in GENERIC_ALIASES:
             dropped_alias += 1
             continue
-        # neu 2 ma cung mot alias -> bo ca hai (mo ho)
         if fa in alias_map and alias_map[fa] != code:
             alias_map[fa] = "__AMBIG__"
         else:
@@ -229,17 +142,12 @@ for code, aliases in raw_names.items():
 alias_map = {k: v for k, v in alias_map.items() if v != "__AMBIG__"}
 print(f"  aliases kept   : {len(alias_map):,}  (dropped {dropped_alias:,} generic/short)")
 
-# Sort longest first so specific aliases win
 ALIAS_SORTED = sorted(alias_map.items(), key=lambda p: -len(p[0]))
 
 CODE_RE = re.compile(r"\b([A-Z]{3})\b")
 
 
-# ---------------------------------------------------------------------------
-# Scoring
-# ---------------------------------------------------------------------------
 def codes_in(text: str) -> dict[str, int]:
-    """Uppercase 3-letter codes with their character offset."""
     out = {}
     for m in CODE_RE.finditer(text or ""):
         c = m.group(1)
@@ -250,7 +158,6 @@ def codes_in(text: str) -> dict[str, int]:
 
 
 def aliases_in(folded: str) -> dict[str, int]:
-    """Company aliases found in folded text, with offset."""
     out = {}
     if not folded:
         return out
@@ -261,7 +168,6 @@ def aliases_in(folded: str) -> dict[str, int]:
             pos = padded.find(f" {fa}")
             if pos == -1:
                 continue
-            # require next char to be space or end
             nxt = pos + 1 + len(fa)
             if nxt < len(padded) and padded[nxt] not in " ":
                 continue
@@ -301,7 +207,6 @@ def score_row(row) -> tuple:
         s = 0.0
         name_confirmed = t in a_title or t in a_sapo or t in a_body
 
-        # ma xuat hien nguyen van trong tieu de
         if t in c_title:
             s += 100 - min(30, c_title[t] * 0.4)
         if t in a_title:
@@ -317,7 +222,6 @@ def score_row(row) -> tuple:
         if t in a_body:
             s += max(0.0, 20 - a_body[t] / 120)
 
-        # ma de trung nghia: bat buoc phai co ten cong ty xac nhan
         if t in NEEDS_NAME_CONFIRM and not name_confirmed:
             s = 0.0
         if t == "VND" and currency_ctx and not name_confirmed:
@@ -348,13 +252,15 @@ def score_row(row) -> tuple:
             is_roundup, is_ad, reason)
 
 
-print("\nScoring 23,195 articles (~1-2 min) ...")
+print("\nScoring articles (~1-2 min) ...")
 res = df.apply(score_row, axis=1, result_type="expand")
 res.columns = ["pt_new", "pt_score", "pt_margin", "n_cand",
                "is_roundup", "is_ad", "pt_reason"]
 df = pd.concat([df.reset_index(drop=True), res.reset_index(drop=True)], axis=1)
 
 df["pt_ok"] = df["pt_reason"] == "ok"
+
+
 def _in_head(r):
     pt = r["pt_new"]
     if not isinstance(pt, str) or not pt:
@@ -367,7 +273,7 @@ def _in_head(r):
 
 df["ticker_in_head"] = df.apply(_in_head, axis=1)
 
-# model input carries the ticker explicitly
+
 def _text_input(r):
     pt = r["pt_new"] if isinstance(r["pt_new"], str) and r["pt_new"] else "MACRO"
     t = r["title"] if isinstance(r["title"], str) else ""
@@ -377,35 +283,29 @@ def _text_input(r):
 
 df["text_input"] = df.apply(_text_input, axis=1)
 
-# ---------------------------------------------------------------------------
-# Report vs old
-# ---------------------------------------------------------------------------
 old_has = df["primary_ticker"].notna()
 print("\n" + "=" * 68)
-print("KET QUA")
+print("RESULTS")
 print("=" * 68)
-print(f"  Cu  : {old_has.sum():,} bai co primary_ticker")
-print(f"  Moi : {df['pt_ok'].sum():,} bai co primary_ticker dat chuan")
-print("\n  Ly do loai:")
+print(f"  Old  : {old_has.sum():,} articles with primary_ticker")
+print(f"  New  : {df['pt_ok'].sum():,} articles with qualifying primary_ticker")
+print("\n  Rejection reasons:")
 print(df["pt_reason"].value_counts().to_string())
 
 both = df[old_has & df["pt_ok"]]
 agree = (both["primary_ticker"] == both["pt_new"]).mean()
-print(f"\n  Trung ma voi pipeline cu (tren tap ca hai deu co): {agree:.1%}")
-print(f"  -> {(1-agree)*len(both):,.0f} bai bi doi ma")
+print(f"\n  Agreement with old pipeline (on articles where both have ticker): {agree:.1%}")
+print(f"  -> {(1-agree)*len(both):,.0f} articles changed ticker")
 
-print(f"\n  ticker hien dien trong title+sapo: {df.loc[df['pt_ok'],'ticker_in_head'].mean():.1%}")
+print(f"\n  Ticker present in title+sapo: {df.loc[df['pt_ok'],'ticker_in_head'].mean():.1%}")
 
 OUT_SCORED.parent.mkdir(parents=True, exist_ok=True)
 df.to_parquet(OUT_SCORED, index=False, engine="pyarrow")
 print(f"\n  Written: {OUT_SCORED}")
 
-# ---------------------------------------------------------------------------
-# to_label_v2
-# ---------------------------------------------------------------------------
 pool = df[df["pt_ok"]].copy()
-print(f"\nPool du dieu kien gan nhan: {len(pool):,}"
-      f"  (ticker hien trong title+sapo: {pool['ticker_in_head'].mean():.1%})")
+print(f"\nEligible pool: {len(pool):,}"
+      f"  (ticker in title+sapo: {pool['ticker_in_head'].mean():.1%})")
 
 parts = []
 for t, g in pool.groupby("pt_new", sort=False):
@@ -422,17 +322,13 @@ to_label = sampled[[c for c in KEEP if c in sampled.columns]].rename(
     columns={"pt_new": "primary_ticker"}
 )
 to_label.to_parquet(OUT_LABEL, index=False, engine="pyarrow")
-print(f"  to_label_v2: {len(to_label):,} bai, {to_label['primary_ticker'].nunique():,} ma")
+print(f"  to_label_v2: {len(to_label):,} articles, {to_label['primary_ticker'].nunique():,} tickers")
 print(f"  Written: {OUT_LABEL}")
 
-# ---------------------------------------------------------------------------
-# Gold seed v2 — giu lai nhan cu khi ticker khong doi
-# ---------------------------------------------------------------------------
 old_gold = pd.read_csv(OLD_GOLD, encoding="utf-8-sig")
 old_gold["id"] = old_gold["id"].astype(str)
 old_map = old_gold.set_index("id")[["primary_ticker", "label", "note"]]
 
-# uu tien giu lai cac bai da gan nhan tay va CHUA doi ticker
 carry = to_label[to_label["id"].astype(str).isin(old_map.index)].copy()
 carry["_old_tk"] = carry["id"].astype(str).map(old_map["primary_ticker"])
 carry = carry[carry["_old_tk"] == carry["primary_ticker"]].drop(columns=["_old_tk"])
@@ -468,36 +364,33 @@ gold_cols = ["id", "date", "primary_ticker", "ticker_in_head", "title", "sapo",
 gold[[c for c in gold_cols if c in gold.columns]].to_csv(
     OUT_GOLD, index=False, encoding="utf-8-sig"
 )
-print(f"\n  gold_seed_v2: {len(gold)} bai, tai su dung {reused} nhan cu")
-print(f"  Trong 150 nhan cu: {len(survive)} con trong pool moi, "
-      f"{n_same} giu nguyen ticker -> nhan van dung")
+print(f"\n  gold_seed_v2: {len(gold)} articles, {reused} labels reused from old gold seed")
+print(f"  Of 150 old labels: {len(survive)} still in new pool, "
+      f"{n_same} with same ticker -> labels remain valid")
 print(f"  Written: {OUT_GOLD}")
 
-# ---------------------------------------------------------------------------
-# Markdown report
-# ---------------------------------------------------------------------------
 changed = both[both["primary_ticker"] != both["pt_new"]].head(25)
 lines = [
-    "# Bao cao sua primary_ticker",
+    "# Ticker repair report",
     "",
-    f"- Bai co primary_ticker (cu): **{old_has.sum():,}**",
-    f"- Bai co primary_ticker dat chuan (moi): **{df['pt_ok'].sum():,}**",
-    f"- Ty le trung ma giua hai pipeline: **{agree:.1%}**",
-    f"- Ticker hien dien trong title+sapo (moi): **{df.loc[df['pt_ok'],'ticker_in_head'].mean():.1%}** "
-    f"(cu: ~68%)",
+    f"- Articles with primary_ticker (old): **{old_has.sum():,}**",
+    f"- Articles with qualifying primary_ticker (new): **{df['pt_ok'].sum():,}**",
+    f"- Agreement between pipelines: **{agree:.1%}**",
+    f"- Ticker present in title+sapo (new): **{df.loc[df['pt_ok'],'ticker_in_head'].mean():.1%}** "
+    f"(old: ~68%)",
     "",
-    "## Ly do loai bai",
+    "## Rejection reasons",
     "",
-    "| Ly do | So bai |",
+    "| Reason | Count |",
     "|---|---|",
 ]
 for k, v in df["pt_reason"].value_counts().items():
     lines.append(f"| {k} | {v:,} |")
 lines += [
     "",
-    "## Vi du bai bi doi ma",
+    "## Examples of changed ticker",
     "",
-    "| Cu | Moi | Tieu de |",
+    "| Old | New | Title |",
     "|---|---|---|",
 ]
 for _, r in changed.iterrows():

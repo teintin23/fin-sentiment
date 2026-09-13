@@ -1,4 +1,3 @@
-"""Download and parse CafeF articles listed in data/raw/urls.jsonl."""
 import hashlib
 import json
 import random
@@ -22,14 +21,12 @@ COMPANY_NAMES_PATH = Path("data/company_names.json")
 
 URL_TIMESTAMP = re.compile(r"(\d{3})(\d{6})(\d{6})\d*\.chn$")
 
-# Editor-curated price box. Confirmed via find_ticker_widget.py.
 TICKER_WIDGET_SELECTOR = "div.chisochungkhoan h2.title_box a"
 
 WIDGET_TEXT = re.compile(
     r"([A-Z]{3}[0-9]?)\s*:\s*Giá hiện tại\s*Thay đổi\s*Xem hồ sơ doanh nghiệp\s*TIN MỚI\s*"
 )
 
-# Three-letter codes that are ordinary acronyms, not tickers.
 BLACKLIST = {"USD", "GDP", "CEO", "FDI", "HSX", "ETF", "IPO", "EPS", "ROE",
              "ROA", "CPI", "FED", "ECB", "COO", "CFO", "CTO", "TPP", "WTO",
              "VAT", "BOT", "PPP", "GMT", "USA", "PMI", "NIM", "CAR", "ESG",
@@ -51,7 +48,6 @@ def load_ticker_whitelist():
 
 
 def load_company_names():
-    """Return [(alias, ticker)] sorted longest-first."""
     if not COMPANY_NAMES_PATH.exists():
         return []
     data = json.loads(COMPANY_NAMES_PATH.read_text(encoding="utf-8"))
@@ -72,7 +68,6 @@ def parse_url_timestamp(url):
 
 
 def extract_tickers(soup, title, sapo, raw_body, whitelist):
-    """Three signals, descending reliability: widget, explicit code, company name."""
     widget = []
     for a in soup.select(TICKER_WIDGET_SELECTOR):
         code = a.get_text(strip=True).replace(":", "").strip().upper()
@@ -80,7 +75,6 @@ def extract_tickers(soup, title, sapo, raw_body, whitelist):
             widget.append(code)
 
     head = f"{title} {sapo}"
-    # Mask cụm gây nhiễu trong bản sao cục bộ — không thay biến gốc
     head_clean = re.sub(
         r"TP\.?\s*HCM\b|Tp\.?\s*HCM\b|TP\.?\s*H\u1ed3\s*Ch\u00ed\s*Minh",
         " ", head, flags=re.IGNORECASE)
@@ -117,7 +111,6 @@ def parse_article(html, url, whitelist):
     title = text_of("h1.title")
     sapo = text_of(".sapo")
 
-    # Must read raw body BEFORE clean_body(): clean_body decompose()s the widget.
     content_el = soup.select_one("div.detail-content")
     raw_body = content_el.get_text(" ", strip=True) if content_el else ""
 

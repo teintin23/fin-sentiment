@@ -1,4 +1,3 @@
-"""Collect article URLs from CafeF timeline endpoints."""
 import json
 import random
 import re
@@ -16,7 +15,6 @@ HEADERS = {
 BASE_URL = "https://cafef.vn"
 ARTICLE_PATTERN = re.compile(r"\d{6,}\.chn")
 
-# Verified CafeF zone ids. Add more after probe_zones.py confirms them.
 ZONES = {
     "stock":       18831,
     "banking":     18834,
@@ -29,7 +27,6 @@ OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def fetch_page_links(zone_id, page):
-    """Return set of absolute article URLs on one timeline page."""
     url = f"{BASE_URL}/timelinelist/{zone_id}/{page}.chn"
     resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
@@ -45,7 +42,6 @@ def fetch_page_links(zone_id, page):
 
 
 def crawl_zone(zone_name, zone_id, max_page, seen, out_file):
-    """Walk one zone until pages stop returning articles."""
     dead_pages = 0
     added = 0
 
@@ -57,8 +53,6 @@ def crawl_zone(zone_name, zone_id, max_page, seen, out_file):
             time.sleep(5)
             continue
 
-        # Stop condition depends on whether the PAGE is empty,
-        # not on whether the URLs are new. Re-runs must not stop early.
         if not links:
             dead_pages += 1
             if dead_pages >= 3:

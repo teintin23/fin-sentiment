@@ -1,27 +1,9 @@
-"""
-lexicon_vi_fin.py
------------------
-Từ điển sentiment tài chính tiếng Việt + luật gán nhãn theo góc nhìn cổ đông.
-
-Dùng làm feature bổ trợ cho mô hình lan truyền nhãn trong ``prelabel_local.py``.
-Không phải bộ gán nhãn độc lập - độ chính xác một mình chỉ ~55-60%.
-
-Quy ước dấu: điểm dương = tốt cho người ĐANG NẮM GIỮ mã đó.
-Nguồn quy tắc: docs/labeling_guide.md muc 3, 5, 6.
-"""
-
 from __future__ import annotations
 
 import re
 import unicodedata
 
-# ----------------------------------------------------------------------------
-# 1. Cụm từ có trọng số. Khớp trên chuỗi đã lowercase, giữ nguyên dấu.
-#    Trọng số |w| lớn = tín hiệu càng dứt khoát.
-# ----------------------------------------------------------------------------
-
 POSITIVE_TERMS: dict[str, float] = {
-    # kết quả kinh doanh
     "lãi kỷ lục": 3.0, "lợi nhuận kỷ lục": 3.0, "lãi lớn": 2.0, "báo lãi": 1.0,
     "cao nhất lịch sử": 2.5, "cao nhất từ trước đến nay": 2.5, "kỷ lục mới": 2.0,
     "vượt kế hoạch": 2.2, "vượt chỉ tiêu": 2.2, "hoàn thành vượt": 2.0,
@@ -29,17 +11,13 @@ POSITIVE_TERMS: dict[str, float] = {
     "tăng gấp": 2.2, "gấp đôi": 1.8, "gấp 3": 2.0, "gấp 5": 2.2,
     "lãi tăng": 2.0, "lợi nhuận tăng": 2.0, "doanh thu tăng": 1.5,
     "chuyển từ lỗ sang lãi": 2.5, "có lãi trở lại": 2.2, "xóa lỗ lũy kế": 2.5,
-    # cổ tức / cổ đông
     "cổ tức bằng tiền": 2.5, "cổ tức tiền mặt": 2.5, "chi trả cổ tức": 1.8,
     "tạm ứng cổ tức": 2.0, "trả cổ tức": 1.5, "chốt quyền": 0.6,
     "mua cổ phiếu quỹ": 2.0, "mua lại cổ phiếu": 1.8,
-    # giao dịch nội bộ / cổ đông lớn mua
     "đăng ký mua": 1.6, "mua vào": 1.4, "gom cổ phiếu": 1.8,
     "trở thành cổ đông lớn": 1.6, "nâng sở hữu": 1.4, "tăng tỷ lệ sở hữu": 1.4,
-    # thị giá
     "tăng trần": 2.2, "tăng kịch trần": 2.2, "tím lịm": 2.0, "vượt đỉnh": 2.0,
-    "lập đỉnh": 1.8, "cao nhất lịch sử": 2.2, "bứt phá mạnh": 1.8,
-    # kinh doanh / hợp đồng
+    "lập đỉnh": 1.8, "bứt phá mạnh": 1.8,
     "ký hợp đồng": 1.6, "trúng thầu": 2.2, "trúng gói thầu": 2.2,
     "hợp đồng lớn": 1.8, "mở rộng thị trường": 1.4, "thâm nhập thị trường": 1.4,
     "được giao đất": 1.6, "chấp thuận chủ trương đầu tư": 1.4,
@@ -53,14 +31,12 @@ POSITIVE_TERMS: dict[str, float] = {
 }
 
 NEGATIVE_TERMS: dict[str, float] = {
-    # kết quả kinh doanh
     "báo lỗ": -3.0, "thua lỗ": -3.0, "lỗ lũy kế": -2.5, "lỗ nặng": -3.0,
     "lỗ kỷ lục": -3.0, "chuyển từ lãi sang lỗ": -3.0,
     "lợi nhuận giảm": -2.2, "lãi giảm": -2.2, "lãi ròng giảm": -2.2,
     "giảm sốc": -2.6, "giảm sâu": -2.2, "sụt giảm": -1.8, "giảm mạnh": -1.8,
     "bốc hơi": -2.0, "đi lùi": -1.8, "hụt hơi": -1.6, "giảm tốc": -1.6,
     "không đạt kế hoạch": -1.6, "chưa như mong muốn": -1.4,
-    # pháp lý / quản lý
     "bị khởi tố": -3.2, "khởi tố": -3.0, "bị bắt": -3.0, "tạm giam": -3.0,
     "bị điều tra": -2.6, "vụ án": -2.4, "buôn lậu": -2.6,
     "bị xử phạt": -2.4, "bị phạt": -2.4, "xử phạt vi phạm": -2.4,
@@ -72,15 +48,12 @@ NEGATIVE_TERMS: dict[str, float] = {
     "ý kiến ngoại trừ": -2.2, "sai sót trọng yếu": -2.4, "cưỡng chế": -2.4,
     "phong tỏa tài sản": -2.8, "tạm hoãn xuất cảnh": -2.6, "nợ thuế": -2.0,
     "chậm đóng bảo hiểm": -2.0, "nợ bảo hiểm": -2.0,
-    # giao dịch nội bộ / cổ đông lớn bán
     "đăng ký bán": -1.8, "bán ra": -1.6, "thoái vốn": -1.2, "xả hàng": -2.2,
     "không còn là cổ đông lớn": -1.8, "rời ghế cổ đông lớn": -1.8,
     "giảm sở hữu": -1.4, "bán giải chấp": -2.6, "call margin": -2.6,
     "bán tháo": -2.6, "bán ròng": -1.6,
-    # thị giá
     "giảm sàn": -2.6, "nằm sàn": -2.6, "lao dốc": -2.4, "thủng đáy": -2.6,
     "giảm hết biên độ": -2.6, "giảm kịch biên độ": -2.6, "mất vốn hóa": -2.2,
-    # vốn / nợ
     "pha loãng": -2.0, "chậm thanh toán": -2.6, "khất nợ": -2.6,
     "chậm trả gốc": -2.6, "chậm trả lãi": -2.6, "mất khả năng thanh toán": -3.0,
     "lùi tiến độ": -1.8, "chậm tiến độ": -1.8, "dừng nhà máy": -2.4,
@@ -88,7 +61,6 @@ NEGATIVE_TERMS: dict[str, float] = {
     "trích lập dự phòng": -1.6, "nợ xấu": -1.6, "kiện tụng": -1.8,
 }
 
-# Cụm gần như luôn kéo về NEUTRAL: PR, danh hiệu, thủ tục.
 NEUTRAL_TERMS: dict[str, float] = {
     "vinh danh": 1.0, "giải thưởng": 1.0, "được trao": 0.8, "bằng khen": 1.2,
     "top 10": 0.8, "top 50": 0.8, "danh hiệu": 1.0, "kỷ niệm": 1.0,
@@ -104,10 +76,8 @@ NEUTRAL_TERMS: dict[str, float] = {
     "khuyến nghị": 1.2, "dự báo thị trường": 1.2, "nhận định": 1.0,
 }
 
-# Phủ định đứng ngay trước cụm thì đảo dấu.
 NEGATORS = ("không ", "chưa ", "phủ nhận ", "bác bỏ ", "không còn ")
 
-# Bài phân tích của CTCK về mã KHÁC -> tin không tác động lên chính CTCK đó.
 BROKER_REPORT_RE = re.compile(
     r"\b(mbs|ssi|vndirect|vcbs|shs|bsc|vcsc|vietcap|mas|tps|vds|sgi|kbsv|agriseco)"
     r"\s+(dự báo|nhận định|đánh giá|khuyến nghị|gọi tên|chỉ ra|chỉ tên|ước tính|research)",
@@ -116,20 +86,10 @@ BROKER_REPORT_RE = re.compile(
 
 
 def _norm(s: str) -> str:
-    """Lowercase + chuẩn hóa Unicode NFC, giữ nguyên dấu tiếng Việt."""
     return unicodedata.normalize("NFC", str(s)).lower()
 
 
 def score_text(text: str) -> dict[str, float]:
-    """Chấm điểm một chuỗi. Trả về dict feature dùng cho mô hình.
-
-    Keys:
-        pos, neg  : tổng trọng số dương / âm (neg là số âm)
-        neu       : tổng trọng số cụm trung tính
-        net       : pos + neg
-        n_hit     : số cụm khớp
-        is_report : 1.0 nếu là bài phân tích của CTCK về mã khác
-    """
     t = _norm(text)
     pos = neg = neu = 0.0
     n_hit = 0
@@ -140,7 +100,6 @@ def score_text(text: str) -> dict[str, float]:
             if idx < 0:
                 continue
             n_hit += 1
-            # phủ định ngay trước -> đảo dấu
             head = t[max(0, idx - 12): idx]
             if any(head.endswith(ng) for ng in NEGATORS):
                 w = -w
@@ -168,10 +127,6 @@ FEATURE_NAMES = ["lex_pos", "lex_neg", "lex_neu", "lex_net", "lex_nhit", "lex_re
 
 
 def rule_label(text: str, margin: float = 2.0) -> str | None:
-    """Nhãn thuần luật, dùng để đối chiếu. None = luật không đủ tự tin.
-
-    Chỉ trả về POSITIVE/NEGATIVE khi tín hiệu một chiều và đủ mạnh.
-    """
     f = score_text(text)
     if f["lex_report"] > 0:
         return "NEUTRAL"

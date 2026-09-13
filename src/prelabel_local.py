@@ -1,42 +1,3 @@
-"""
-prelabel_local.py
------------------
-Gán nhãn ~5.500 bài KHÔNG gọi API trả phí, thay thế cho src/prelabel_local.py.
-
-Ý tưởng: thay vì hỏi LLM từng bài (tốn tiền, cần API key), ta dùng một tập
-nhãn hạt giống chất lượng cao đã có sẵn rồi lan truyền sang phần còn lại bằng
-một bộ phân loại nhẹ.
-
-    data/interim/claude_seed_labels.csv   1.170 nhãn do trợ lý Claude gán tay
-                                          (toàn bộ split test + mẫu train/val)
-              |
-              v
-    TF-IDF (word 1-2gram + char_wb 3-5gram) trên text_input
-    + 6 feature từ src/lexicon_vi_fin.py
-              |
-              v
-    LogisticRegression đã hiệu chuẩn xác suất (CalibratedClassifierCV)
-              |
-              v
-    self-training 1 vòng: thêm dự đoán có conf >= SELF_TRAIN_TH rồi huấn luyện lại
-              |
-              v
-    data/interim/labeled_auto.jsonl   (đúng schema mà eval_labels.py / finalize_dataset.py cần)
-
-Ràng buộc quan trọng để con số kappa ở P1.3 không bị thổi phồng:
-  - KHÔNG bao giờ đưa nhãn trong gold_seed_v2.csv vào tập huấn luyện.
-    Nhãn người là thước đo, dùng nó để dạy mô hình rồi lại đem chấm điểm mô hình
-    trên chính nó là gian lận.
-  - Với id đã có nhãn tay trong seed, ghi thẳng nhãn tay (label_source="claude_manual").
-  - Với id còn lại, ghi dự đoán mô hình (label_source="weak_model") kèm confidence
-    thực tế đã hiệu chuẩn.
-
-Usage:
-    python src/prelabel_local.py              # chạy bình thường (resume được)
-    python src/prelabel_local.py --rebuild    # bỏ file cũ, gán lại từ đầu
-    python src/prelabel_local.py --report     # chỉ in thống kê file đã có
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -61,7 +22,6 @@ from lexicon_vi_fin import FEATURE_NAMES, score_text  # noqa: E402
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-# ---------------------------------------------------------------- cấu hình ---
 ROOT = Path(__file__).resolve().parent.parent
 IN_FILE = ROOT / "data" / "interim" / "to_label_v2.parquet"
 SEED_FILE = ROOT / "data" / "interim" / "claude_seed_labels.csv"
@@ -71,13 +31,12 @@ REPORT = ROOT / "docs" / "prelabel_local_report.md"
 
 SEED = 42
 N_FOLDS = 5
-SELF_TRAIN_TH = 0.80   # ngưỡng conf để đưa dự đoán vào vòng huấn luyện thứ 2
-MANUAL_CONF = 0.95     # confidence gán cho nhãn tay
+SELF_TRAIN_TH = 0.80
+MANUAL_CONF = 0.95
 LABELS = ["NEGATIVE", "NEUTRAL", "POSITIVE"]
 
 
 def build_features(texts: list[str], vecs=None, scaler=None, fit: bool = False):
-    """TF-IDF word + char, ghép thêm feature từ điển. Trả về (X, vecs, scaler)."""
     if fit:
         vw = TfidfVectorizer(analyzer="word", ngram_range=(1, 2), min_df=2,
                              max_features=60000, sublinear_tf=True)
@@ -105,7 +64,6 @@ def make_clf() -> CalibratedClassifierCV:
 
 
 def reliability_table(conf: np.ndarray, correct: np.ndarray) -> pd.DataFrame:
-    """Bảng đối chiếu confidence dự đoán với độ chính xác thực tế."""
     bins = [0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.01]
     idx = np.digitize(conf, bins) - 1
     rows = []
@@ -114,45 +72,45 @@ def reliability_table(conf: np.ndarray, correct: np.ndarray) -> pd.DataFrame:
         if m.sum() == 0:
             continue
         rows.append({
-            "khoảng conf": f"{bins[b]:.2f}-{bins[b+1]:.2f}",
+            "conf range": f"{bins[b]:.2f}-{bins[b+1]:.2f}",
             "n": int(m.sum()),
-            "conf TB": round(float(conf[m].mean()), 3),
-            "accuracy thực": round(float(correct[m].mean()), 3),
+            "avg conf": round(float(conf[m].mean()), 3),
+            "actual accuracy": round(float(correct[m].mean()), 3),
         })
     return pd.DataFrame(rows)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rebuild", action="store_true", help="xóa jsonl cũ, gán lại")
-    ap.add_argument("--report", action="store_true", help="chỉ in thống kê file có sẵn")
+    ap.add_argument("--rebuild", action="store_true", help="delete existing jsonl and relabel from scratch")
+    ap.add_argument("--report", action="store_true", help="print stats for existing file only")
     args = ap.parse_args()
 
     if args.report:
         return summarize()
 
     print("=" * 68)
-    print("PRELABEL LOCAL - khong goi API, khong ton phi")
+    print("PRELABEL LOCAL - no API calls, no cost")
     print("=" * 68)
 
     df = pd.read_parquet(IN_FILE)
     df["id"] = df["id"].astype(str)
-    print(f"  to_label_v2      : {len(df):,} bai")
+    print(f"  to_label_v2      : {len(df):,} articles")
 
     if not SEED_FILE.exists():
-        print(f"  THIEU {SEED_FILE}. Khong the chay.")
+        print(f"  MISSING: {SEED_FILE}. Cannot continue.")
         return 1
     seed = pd.read_csv(SEED_FILE, encoding="utf-8-sig")
     seed["id"] = seed["id"].astype(str)
     seed = seed[seed["label"].isin(LABELS)].drop_duplicates(subset="id")
-    print(f"  nhan hat giong   : {len(seed):,} bai ({len(seed)/len(df):.1%})")
+    print(f"  seed labels      : {len(seed):,} articles ({len(seed)/len(df):.1%})")
 
     gold_ids: set[str] = set()
     if GOLD_FILE.exists():
         g = pd.read_csv(GOLD_FILE, encoding="utf-8-sig")
         g = g[g["label"].notna() & (g["label"].astype(str).str.strip() != "")]
         gold_ids = set(g["id"].astype(str))
-    print(f"  nhan nguoi (gold): {len(gold_ids):,} bai - KHONG dua vao training")
+    print(f"  human gold set   : {len(gold_ids):,} articles - EXCLUDED from training")
 
     if args.rebuild and OUT_FILE.exists():
         OUT_FILE.unlink()
@@ -167,23 +125,21 @@ def main() -> int:
                         done_ids.add(str(json.loads(line)["id"]))
                     except Exception:
                         pass
-        print(f"  resume           : bo qua {len(done_ids):,} bai da co nhan")
+        print(f"  resume           : skipping {len(done_ids):,} already labeled")
 
     text_by_id = dict(zip(df["id"], df["text_input"].astype(str)))
 
-    # ---- tap huan luyen: chi nhan hat giong, tuyet doi khong co gold ---------
     train = seed.copy()
     train["text"] = train["id"].map(text_by_id)
     train = train.dropna(subset=["text"])
-    print(f"  tap train        : {len(train):,} bai")
-    print("  phan bo:", dict(Counter(train["label"])))
+    print(f"  train set        : {len(train):,} articles")
+    print("  distribution:", dict(Counter(train["label"])))
 
     Xtr, vecs, scaler = build_features(train["text"].tolist(), fit=True)
     ytr = train["label"].to_numpy()
 
-    # ---- do chat luong bang cross-validation --------------------------------
     print("\n" + "-" * 68)
-    print("Cross-validation 5-fold tren tap hat giong")
+    print("Cross-validation 5-fold on seed labels")
     print("-" * 68)
     cv = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
     proba_cv = cross_val_predict(make_clf(), Xtr, ytr, cv=cv, method="predict_proba")
@@ -198,20 +154,18 @@ def main() -> int:
     print(f"  macro-F1  : {mf1:.4f}")
     print(classification_report(ytr, pred_cv, digits=3, zero_division=0))
     rel = reliability_table(conf_cv, correct)
-    print("Do tin cay cua confidence:")
+    print("Confidence reliability:")
     print(rel.to_string(index=False))
 
-    # ---- vong 1: huan luyen day du + du doan phan con lai -------------------
     clf = make_clf().fit(Xtr, ytr)
     rest = df[~df["id"].isin(set(train["id"]))].reset_index(drop=True)
     Xre, _, _ = build_features(rest["text_input"].astype(str).tolist(), vecs, scaler)
     p1 = clf.predict_proba(Xre)
 
-    # ---- vong 2: self-training tren du doan tu tin --------------------------
     conf1 = p1.max(axis=1)
     lab1 = classes[p1.argmax(axis=1)]
     take = conf1 >= SELF_TRAIN_TH
-    print(f"\nSelf-training: them {int(take.sum()):,} du doan co conf >= {SELF_TRAIN_TH}")
+    print(f"\nSelf-training: adding {int(take.sum()):,} predictions with conf >= {SELF_TRAIN_TH}")
 
     aug_texts = train["text"].tolist() + rest.loc[take, "text_input"].astype(str).tolist()
     aug_y = np.concatenate([ytr, lab1[take]])
@@ -222,10 +176,9 @@ def main() -> int:
     p2 = clf2.predict_proba(Xre2)
     conf2 = p2.max(axis=1)
     lab2 = classes[p2.argmax(axis=1)]
-    print(f"  conf trung binh sau self-training: {conf2.mean():.3f} "
-          f"(truoc: {conf1.mean():.3f})")
+    print(f"  avg confidence after self-training: {conf2.mean():.3f} "
+          f"(before: {conf1.mean():.3f})")
 
-    # ---- ghi ket qua ---------------------------------------------------------
     manual = dict(zip(train["id"], train["label"]))
     pred_map = dict(zip(rest["id"], zip(lab2, conf2)))
 
@@ -237,11 +190,11 @@ def main() -> int:
                 continue
             if rid in manual:
                 label, conf, src = manual[rid], MANUAL_CONF, "claude_manual"
-                reason = "gan tay theo docs/labeling_guide.md"
+                reason = "hand-labeled following docs/labeling_guide.md"
             else:
                 label, conf = pred_map[rid]
                 src = "weak_model"
-                reason = "lan truyen tu nhan hat giong (tfidf+lexicon+LR)"
+                reason = "label propagation from seed set (tfidf+lexicon+LR)"
             out.write(json.dumps({
                 "id": rid,
                 "primary_ticker": str(row.get("primary_ticker", "")),
@@ -254,48 +207,48 @@ def main() -> int:
             }, ensure_ascii=False) + "\n")
             n_new += 1
 
-    print(f"\nDa ghi them {n_new:,} dong vao {OUT_FILE.name}")
+    print(f"\nWrote {n_new:,} rows to {OUT_FILE.name}")
     write_report(len(df), len(train), acc, mf1, rel, classes, ytr, pred_cv, gold_ids)
     return summarize()
 
 
 def write_report(n_total, n_seed, acc, mf1, rel, classes, ytr, pred_cv, gold_ids) -> None:
-    cm = pd.crosstab(pd.Series(ytr, name="Claude gan tay"),
-                     pd.Series(pred_cv, name="Mo hinh du doan"))
+    cm = pd.crosstab(pd.Series(ytr, name="Hand-labeled"),
+                     pd.Series(pred_cv, name="Model prediction"))
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     with REPORT.open("w", encoding="utf-8") as f:
         w = f.write
-        w("# Báo cáo gán nhãn cục bộ (prelabel_local)\n\n")
-        w("Thay thế cho `prelabel_local.py`. Không gọi API, không tốn phí.\n\n")
-        w("## 1. Quy mô\n\n")
-        w(f"- Tổng số bài cần nhãn: **{n_total:,}**\n")
-        w(f"- Nhãn hạt giống gán tay: **{n_seed:,}** ({n_seed/n_total:.1%})\n")
-        w(f"- Nhãn người trong gold seed (không dùng để huấn luyện): {len(gold_ids):,}\n\n")
-        w("## 2. Chất lượng mô hình lan truyền (5-fold CV trên tập hạt giống)\n\n")
+        w("# Prelabel local report\n\n")
+        w("No API calls, no cost. Label propagation from seed labels.\n\n")
+        w("## 1. Scale\n\n")
+        w(f"- Total articles to label: **{n_total:,}**\n")
+        w(f"- Seed labels: **{n_seed:,}** ({n_seed/n_total:.1%})\n")
+        w(f"- Human gold set (excluded from training): {len(gold_ids):,}\n\n")
+        w("## 2. Model quality (5-fold CV on seed labels)\n\n")
         w(f"- accuracy: **{acc:.4f}**\n- macro-F1: **{mf1:.4f}**\n\n")
-        w("### Ma trận nhầm lẫn\n\n")
+        w("### Confusion matrix\n\n")
         w(cm.to_markdown() + "\n\n")
-        w("### Độ tin cậy của confidence\n\n")
+        w("### Confidence reliability\n\n")
         w(rel.to_markdown(index=False) + "\n\n")
-        w("Cột `accuracy thực` cho biết trong nhóm dự đoán có confidence rơi vào\n")
-        w("khoảng đó, thực tế bao nhiêu phần trăm đúng. Dùng bảng này để chọn\n")
-        w("ngưỡng lọc ở `finalize_dataset.py`.\n\n")
-        w("## 3. Cách đọc cột label_source trong labeled_auto.jsonl\n\n")
-        w("| Giá trị | Nghĩa | confidence |\n|---|---|---|\n")
-        w("| `claude_manual` | Trợ lý đọc từng bài và gán theo labeling_guide | 0.95 |\n")
-        w("| `weak_model` | Mô hình lan truyền dự đoán | xác suất đã hiệu chuẩn |\n\n")
-        w("## 4. Hạn chế\n\n")
-        w("- Nhãn hạt giống do một mô hình ngôn ngữ gán, không phải chuyên gia tài chính.\n")
-        w("- Mô hình lan truyền chỉ nhìn tiêu đề + sapo, không đọc toàn văn.\n")
-        w("- Tập hạt giống lệch về nửa cuối giai đoạn dữ liệu, nên phần train\n")
-        w("  (thời gian sớm hơn) chủ yếu là nhãn `weak_model`, độ nhiễu cao hơn.\n")
-        w("- Nhãn `weak_model` chỉ nên coi là nhãn yếu. Mọi kết luận về chất lượng\n")
-        w("  mô hình ở P2 phải báo cáo riêng trên phần `label_source == \"human\"`.\n")
+        w("The `actual accuracy` column shows what fraction of predictions in that confidence "
+          "band are correct. Use this table to choose the confidence threshold in "
+          "`finalize_dataset.py`.\n\n")
+        w("## 3. label_source values in labeled_auto.jsonl\n\n")
+        w("| Value | Meaning | confidence |\n|---|---|---|\n")
+        w("| `claude_manual` | AI assistant read and labeled each article following the guide | 0.95 |\n")
+        w("| `weak_model` | Label propagation prediction | calibrated probability |\n\n")
+        w("## 4. Limitations\n\n")
+        w("- Seed labels come from a language model, not a financial expert.\n")
+        w("- Propagation model reads only headline and lead, not full text.\n")
+        w("- Seed labels are biased toward the later part of the date range, so train "
+          "articles (earlier dates) are mostly `weak_model` with higher noise.\n")
+        w("- `weak_model` labels are weak labels. All model quality reports must be "
+          "reported separately on `label_source == \"human\"` rows.\n")
 
 
 def summarize() -> int:
     if not OUT_FILE.exists():
-        print("Chua co labeled_auto.jsonl")
+        print("No labeled_auto.jsonl yet")
         return 1
     recs = []
     with OUT_FILE.open(encoding="utf-8") as fh:
@@ -308,26 +261,26 @@ def summarize() -> int:
                     pass
     total = len(recs)
     print("\n" + "=" * 68)
-    print("TONG KET")
+    print("SUMMARY")
     print("=" * 68)
-    print(f"labeled_auto.jsonl: {total:,} dong")
+    print(f"labeled_auto.jsonl: {total:,} rows")
     cnt = Counter(r["label"] for r in recs)
     for lbl in LABELS:
         pct = cnt.get(lbl, 0) / max(total, 1) * 100
         print(f"  {lbl:9s} {cnt.get(lbl,0):6,}  ({pct:5.1f}%)  {'#' * int(pct/2)}")
     src = Counter(r.get("label_source", "?") for r in recs)
-    print("\nNguon nhan:", dict(src))
+    print("\nLabel sources:", dict(src))
     conf = np.array([r["confidence"] for r in recs])
-    print(f"confidence: TB={conf.mean():.3f}  <0.5: {int((conf<0.5).sum()):,} bai")
+    print(f"confidence: avg={conf.mean():.3f}  <0.5: {int((conf<0.5).sum()):,}")
 
     ok = True
     if total < 5000:
-        print(f"FAIL: chi co {total:,} dong")
+        print(f"FAIL: only {total:,} rows")
         ok = False
     for lbl in LABELS:
         pct = cnt.get(lbl, 0) / max(total, 1) * 100
         if pct < 5:
-            print(f"FAIL: nhan {lbl} chi {pct:.1f}% (<5%)")
+            print(f"FAIL: label {lbl} is {pct:.1f}% (<5%)")
             ok = False
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1

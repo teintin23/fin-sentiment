@@ -1,21 +1,3 @@
-"""
-train_phobert.py
-----------------
-Fine-tune vinai/phobert-base cho phân loại sentiment 3 lớp.
-
-PhoBERT yêu cầu văn bản ĐÃ TÁCH TỪ trước khi tokenize. Bỏ bước này điểm tụt
-mạnh. Script dùng lại `data/interim/tokenized_cache.parquet` do train_baseline.py
-sinh ra; nếu chưa có thì tự tách bằng underthesea.
-
-Test set gồm 810 bài, toàn bộ là nhãn đọc tay (788 `claude_manual` + 22 `human`),
-không có nhãn `weak_model`. Train thì ngược lại, ~89% là nhãn lan truyền. Vì vậy
-script in riêng kết quả trên nhóm `source_detail == "human"`.
-
-Usage:
-    python src/train_phobert.py
-    python src/train_phobert.py --epochs 2 --batch 8      # máy yếu
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -63,7 +45,7 @@ def load_tokenized() -> dict[str, str]:
     if CACHE.exists():
         c = pd.read_parquet(CACHE)
         return dict(zip(c["id"].astype(str), c["tok"]))
-    print("  chua co tokenized_cache.parquet, tach tu bang underthesea ...")
+    print("  tokenized_cache.parquet not found, tokenizing with underthesea ...")
     from underthesea import word_tokenize
     frames = [pd.read_parquet(PROC / f"{n}.parquet") for n in ("train", "val", "test")]
     allrows = pd.concat(frames)[["id", "text_input"]].drop_duplicates("id")
@@ -93,8 +75,8 @@ def main() -> int:
     print("=" * 68)
     print(f"PhoBERT fine-tune  |  device={'GPU ' + torch.cuda.get_device_name(0) if has_gpu else 'CPU'}")
     if not has_gpu:
-        print("  CANH BAO: khong co GPU. Uoc tinh 3-6 gio cho 2 epoch tren ~4.600 bai.")
-        print("  Da giam num_train_epochs xuong 2. Nen chay tren Colab/Kaggle co GPU.")
+        print("  WARNING: no GPU detected. Estimated 3-6 hours for 2 epochs on ~4,600 articles.")
+        print("  Reduced num_train_epochs to 2. Consider running on Colab/Kaggle with GPU.")
     print("=" * 68)
 
     tr = pd.read_parquet(PROC / "train.parquet")
@@ -120,7 +102,6 @@ def main() -> int:
         BASE, num_labels=3,
         id2label={i: l for l, i in L2I.items()}, label2id=L2I)
 
-    # class weights tu tan suat nhan trong train
     counts = tr["labels"].value_counts().sort_index().to_numpy()
     weights = torch.tensor(len(tr) / (3 * counts), dtype=torch.float)
     print(f"  class weights: {dict(zip(LABELS, weights.tolist()))}")
@@ -166,18 +147,16 @@ def main() -> int:
     )
     trainer.train()
 
-    # ---- duong cong macro-F1 theo epoch tren val --------------------------
     hist = [(h["epoch"], h["eval_macro_f1"]) for h in trainer.state.log_history
             if "eval_macro_f1" in h]
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     if hist:
         plt.figure(figsize=(6, 4))
         plt.plot([e for e, _ in hist], [f for _, f in hist], marker="o")
-        plt.xlabel("Epoch"); plt.ylabel("macro-F1 trên val")
-        plt.title("PhoBERT — macro-F1 theo epoch"); plt.grid(alpha=.3)
+        plt.xlabel("Epoch"); plt.ylabel("macro-F1 on val")
+        plt.title("PhoBERT — macro-F1 per epoch"); plt.grid(alpha=.3)
         plt.tight_layout(); plt.savefig(FIG_DIR / "phobert_training.png", dpi=140); plt.close()
 
-    # ---- danh gia tren test ----------------------------------------------
     pr = trainer.predict(ds["test"])
     pred = pr.predictions.argmax(-1)
     y = te["labels"].to_numpy()
@@ -192,7 +171,7 @@ def main() -> int:
     plt.figure(figsize=(5.5, 4.5))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Purples",
                 xticklabels=LABELS, yticklabels=LABELS, cbar=False)
-    plt.xlabel("Dự đoán"); plt.ylabel("Nhãn thật")
+    plt.xlabel("Predicted"); plt.ylabel("True")
     plt.title(f"PhoBERT — test (macro-F1={mf1:.3f})")
     plt.tight_layout(); plt.savefig(FIG_DIR / "cm_phobert.png", dpi=140); plt.close()
 
@@ -203,18 +182,18 @@ def main() -> int:
             sub = {"n": int(hm.sum()),
                    "macro_F1": round(f1_score(y[hm], pred[hm], average="macro"), 4),
                    "accuracy": round(accuracy_score(y[hm], pred[hm]), 4)}
-            print(f"Rieng nhom nhan NGUOI (n={sub['n']}): macro-F1={sub['macro_F1']:.4f}")
+            print(f"Human labels in test (n={sub['n']}): macro-F1={sub['macro_F1']:.4f}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     trainer.save_model(str(MODEL_DIR)); tokenizer.save_pretrained(str(MODEL_DIR))
     (MODEL_DIR / "test_predictions.json").write_text(
         json.dumps({"id": te["id"].astype(str).tolist(),
                     "y_true": y.tolist(), "y_pred": pred.tolist()}), encoding="utf-8")
-    print(f"Da luu model: {MODEL_DIR}")
+    print(f"Model saved: {MODEL_DIR}")
 
     write_doc(mf1, acc, wf1, rep, cm, sub, hist, epochs, args, has_gpu, te)
-    print(f"Da ghi: {DOC}")
-    print(f"\nP2.2 PASS  |  macro-F1 tren test = {mf1:.4f}")
+    print(f"Written: {DOC}")
+    print(f"\nP2.2 PASS  |  macro-F1 on test = {mf1:.4f}")
     return 0
 
 
@@ -224,16 +203,16 @@ def write_doc(mf1, acc, wf1, rep, cm, sub, hist, epochs, args, has_gpu, te) -> N
         w = f.write
         w("# PhoBERT fine-tuned\n\n")
         w(f"Base model: `{BASE}`, `num_labels=3`, `max_length={MAX_LEN}`.\n")
-        w("Văn bản được tách từ bằng `underthesea.word_tokenize` **trước khi** "
-          "tokenize — bỏ bước này điểm tụt mạnh.\n\n")
-        w("## 1. Siêu tham số đã dùng\n\n")
-        w("| Tham số | Giá trị |\n|---|---|\n")
+        w("Text must be word-segmented with `underthesea.word_tokenize` **before** "
+          "tokenization — skipping this step degrades performance significantly.\n\n")
+        w("## 1. Hyperparameters\n\n")
+        w("| Parameter | Value |\n|---|---|\n")
         w(f"| learning_rate | {args.lr} |\n| batch size | {args.batch} |\n"
           f"| epochs | {epochs} |\n| warmup_ratio | 0.1 |\n| weight_decay | 0.01 |\n"
-          f"| early stopping patience | 2 |\n| class weights | có, tính từ tần suất nhãn train |\n"
-          f"| phần cứng | {'GPU' if has_gpu else 'CPU'} |\n| seed | {SEED} |\n\n")
-        w("## 2. Kết quả trên test\n\n")
-        w("| Chỉ số | Giá trị |\n|---|---|\n")
+          f"| early stopping patience | 2 |\n| class weights | yes, inverse label frequency |\n"
+          f"| hardware | {'GPU' if has_gpu else 'CPU'} |\n| seed | {SEED} |\n\n")
+        w("## 2. Test results\n\n")
+        w("| Metric | Value |\n|---|---|\n")
         w(f"| macro-F1 | **{mf1:.4f}** |\n| accuracy | {acc:.4f} |\n"
           f"| weighted-F1 | {wf1:.4f} |\n\n")
         w("## 3. Classification report\n\n```\n" + rep + "```\n\n")
@@ -242,47 +221,46 @@ def write_doc(mf1, acc, wf1, rep, cm, sub, hist, epochs, args, has_gpu, te) -> N
         for i, lb in enumerate(LABELS):
             w(f"| **{lb}** | " + " | ".join(str(x) for x in cm[i]) + " |\n")
         w("\n![cm](../reports/figures/cm_phobert.png)\n\n")
-        w("## 5. Đường cong macro-F1 theo epoch (val)\n\n")
+        w("## 5. macro-F1 per epoch (val)\n\n")
         if hist:
             w("| Epoch | macro-F1 val |\n|---|---|\n")
             for e, s in hist:
                 w(f"| {e:.2f} | {s:.4f} |\n")
         w("\n![training](../reports/figures/phobert_training.png)\n\n")
-        w("> Val chứa ~94% nhãn `weak_model`, nên đường cong này phản ánh mức khớp\n"
-          "> với nhãn yếu chứ không hoàn toàn là năng lực đọc tin. Dùng nó để chọn\n"
-          "> checkpoint thì được, dùng nó làm con số báo cáo thì không.\n\n")
-        w("## 6. Kết quả riêng trên phần nhãn người\n\n")
+        w("> Val contains ~94% `weak_model` labels, so this curve reflects how well\n"
+          "> the model mimics noisy labels rather than reading news. Use it for checkpoint\n"
+          "> selection only, not as a performance figure.\n\n")
+        w("## 6. Results on human-labeled subset\n\n")
         if sub:
             w(f"- n = {sub['n']}\n- macro-F1: **{sub['macro_F1']:.4f}**\n"
               f"- accuracy: {sub['accuracy']:.4f}\n\n")
-            w("Cỡ mẫu nhỏ, chỉ dùng đối chiếu định tính.\n\n")
+            w("Small sample size; use for qualitative comparison only.\n\n")
         if "source_detail" in te:
-            w("### Nguồn nhãn của test set\n\n| Nguồn | Số bài |\n|---|---:|\n")
+            w("### Label source breakdown in test set\n\n| Source | Count |\n|---|---:|\n")
             for k, v in te["source_detail"].value_counts().items():
                 w(f"| `{k}` | {v} |\n")
             w("\n")
-        w("## 7. Định dạng đầu vào khi dùng lại model\n\n")
-        w("Input phải có dạng `\"[TICKER] Tiêu đề. Đoạn dẫn\"` và **phải tách từ** "
-          "trước khi đưa vào tokenizer:\n\n")
+        w("## 7. How to use the model\n\n")
+        w("Input must be `\"[TICKER] Headline. Lead paragraph\"` and **must be word-segmented** "
+          "before passing to the tokenizer:\n\n")
         w("```python\n"
           "from transformers import AutoTokenizer, AutoModelForSequenceClassification\n"
           "from underthesea import word_tokenize\n"
           "import torch\n\n"
           "tok = AutoTokenizer.from_pretrained('models/phobert-vnfin')\n"
           "model = AutoModelForSequenceClassification.from_pretrained('models/phobert-vnfin')\n\n"
-          "text = '[HPG] Hòa Phát báo lãi kỷ lục quý 2. Lợi nhuận tăng 48% so với cùng kỳ.'\n"
+          "text = '[HPG] Hoa Phat reports record Q2 profit. Net income up 48% YoY.'\n"
           "seg = word_tokenize(text, format='text')\n"
           "x = tok(seg, return_tensors='pt', truncation=True, max_length=256)\n"
           "print(model.config.id2label[model(**x).logits.argmax(-1).item()])\n"
           "```\n\n")
-        w("## 8. Hạn chế\n\n")
-        w("- ~89% nhãn train do mô hình yếu lan truyền; trần hiệu năng bị chặn bởi "
-          "chất lượng nhãn chứ không phải kiến trúc.\n")
-        w("- Chỉ đọc tiêu đề + sapo, không đọc toàn văn.\n")
-        w("- Độ chính xác gán `primary_ticker` ước tính ~85%, sai ticker thì nhãn "
-          "sai theo dù mô hình đọc đúng nội dung.\n")
-        w("- Dữ liệu một nguồn (CafeF), khoảng thời gian ngắn (12/2024–08/2026).\n")
-        w("- KHÔNG dùng cho quyết định đầu tư thật.\n")
+        w("## 8. Limitations\n\n")
+        w("- ~89% of train labels come from a weak propagation model; performance ceiling "
+          "is set by label quality, not architecture.\n")
+        w("- Reads headlines and lead paragraphs only, not full article text.\n")
+        w("- Ticker attribution accuracy ~85%; wrong ticker means wrong label target.\n")
+        w("- Single source (CafeF), short time window (late 2024 to mid 2026).\n")
+        w("- Not for use in real investment decisions.\n")
 
 
 if __name__ == "__main__":

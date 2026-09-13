@@ -1,13 +1,3 @@
-﻿"""
-build_dataset.py
-----------------
-Doc data/raw/articles.jsonl, lam sach va dedupe, ghi data/interim/articles_clean.parquet.
-In so dong con lai sau moi buoc va ghi bao cao ra docs/data_quality.md.
-
-Usage:
-    python src/build_dataset.py
-"""
-
 from __future__ import annotations
 
 import json
@@ -19,7 +9,6 @@ from pathlib import Path
 
 import pandas as pd
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
 RAW_FILE = ROOT / "data" / "raw" / "articles.jsonl"
 OUT_FILE = ROOT / "data" / "interim" / "articles_clean.parquet"
@@ -28,7 +17,6 @@ DOCS_FILE = ROOT / "docs" / "data_quality.md"
 TODAY = date.today()
 MIN_DATE = date(2015, 1, 1)
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
 _PUNCT_RE = re.compile(r"[" + re.escape(string.punctuation) + r"]")
 _WS_RE = re.compile(r"\s+")
 
@@ -46,9 +34,8 @@ def first_elem(lst):
     return None
 
 
-# ── Step 1: Load ──────────────────────────────────────────────────────────────
 print("=" * 60)
-print("Step 1 – Loading articles.jsonl ...")
+print("Step 1 - Loading articles.jsonl ...")
 records = []
 with open(RAW_FILE, "r", encoding="utf-8") as fh:
     for line in fh:
@@ -62,38 +49,34 @@ with open(RAW_FILE, "r", encoding="utf-8") as fh:
 df = pd.DataFrame(records)
 step_counts = []
 n = len(df)
-step_counts.append(("1 – Load tong so", n))
-print(f"  -> {n:,} dong")
+step_counts.append(("1 - Total loaded", n))
+print(f"  -> {n:,} rows")
 
-# ── Step 2: Bo title rong / ngan ──────────────────────────────────────────────
-print("Step 2 – Bo dong title rong hoac len(title) < 15 ...")
+print("Step 2 - Drop rows where title is empty or len(title) < 15 ...")
 df["title"] = df["title"].fillna("").astype(str).str.strip()
 df = df[df["title"].str.len() >= 15].copy()
 n = len(df)
-step_counts.append(("2 – Sau loc title", n))
-print(f"  -> {n:,} dong")
+step_counts.append(("2 - After title filter", n))
+print(f"  -> {n:,} rows")
 
-# ── Step 3: Dedupe theo url ────────────────────────────────────────────────────
-print("Step 3 – Dedupe theo url ...")
+print("Step 3 - Deduplicate by url ...")
 df["url"] = df["url"].fillna("").astype(str).str.strip()
 df = df.drop_duplicates(subset=["url"], keep="first").copy()
 n = len(df)
-step_counts.append(("3 – Sau dedupe url", n))
-print(f"  -> {n:,} dong")
+step_counts.append(("3 - After url dedup", n))
+print(f"  -> {n:,} rows")
 
-# ── Step 4: Dedupe theo title chuan hoa, giu date som nhat ───────────────────
-print("Step 4 – Dedupe theo title chuan hoa (giu date som nhat) ...")
+print("Step 4 - Deduplicate by normalised title (keep earliest date) ...")
 df["title_norm"] = df["title"].apply(normalise_title)
 df["_date_sort"] = df["date"].fillna("9999-99-99").astype(str)
 df = df.sort_values("_date_sort", ascending=True)
 df = df.drop_duplicates(subset=["title_norm"], keep="first").copy()
 df = df.drop(columns=["_date_sort"])
 n = len(df)
-step_counts.append(("4 – Sau dedupe title", n))
-print(f"  -> {n:,} dong")
+step_counts.append(("4 - After title dedup", n))
+print(f"  -> {n:,} rows")
 
-# ── Step 5: Parse datetime ─────────────────────────────────────────────────────
-print("Step 5 – Parse date + time -> datetime ...")
+print("Step 5 - Parse date + time -> datetime ...")
 df["date"] = df["date"].fillna("").astype(str).str.strip()
 df["time"] = df["time"].fillna("").astype(str).str.strip()
 df["_dt_str"] = df.apply(
@@ -102,10 +85,9 @@ df["_dt_str"] = df.apply(
 )
 df["datetime"] = pd.to_datetime(df["_dt_str"], format="mixed", errors="coerce")
 df = df.drop(columns=["_dt_str"])
-print(f"  -> {len(df):,} dong (datetime parse hoan tat)")
+print(f"  -> {len(df):,} rows (datetime parse done)")
 
-# ── Step 6: Bo date null / tuong lai / truoc 2015 ─────────────────────────────
-print("Step 6 – Bo dong date null, date > hom nay, date < 2015-01-01 ...")
+print("Step 6 - Drop rows with null/future/pre-2015 dates ...")
 dt_date = df["datetime"].dt.date
 mask = (
     df["datetime"].notna()
@@ -114,17 +96,15 @@ mask = (
 )
 df = df[mask].copy()
 n = len(df)
-step_counts.append(("5 – Sau loc date null", n))
-step_counts.append(("6 – Sau loc date range", n))
-print(f"  -> {n:,} dong")
+step_counts.append(("5 - After null date filter", n))
+step_counts.append(("6 - After date range filter", n))
+print(f"  -> {n:,} rows")
 
-# ── Step 7: Tao cot text ──────────────────────────────────────────────────────
-print("Step 7 – Tao cot text = title + sapo ...")
+print("Step 7 - Create text = title + sapo ...")
 df["sapo"] = df["sapo"].fillna("").astype(str).str.strip()
 df["text"] = (df["title"] + " " + df["sapo"]).apply(lambda s: _WS_RE.sub(" ", s).strip())
 
-# ── Step 8: n_tickers ─────────────────────────────────────────────────────────
-print("Step 8 – Tao cot n_tickers ...")
+print("Step 8 - Create n_tickers ...")
 
 def safe_len(v):
     return len(v) if isinstance(v, list) else 0
@@ -137,12 +117,10 @@ for col in ("tickers_any", "tickers_widget", "tickers_explicit", "tickers_by_nam
 
 df["n_tickers"] = df["tickers_any"].apply(safe_len)
 
-# ── Step 9: is_macro ──────────────────────────────────────────────────────────
-print("Step 9 – Tao cot is_macro ...")
+print("Step 9 - Create is_macro ...")
 df["is_macro"] = df["n_tickers"] == 0
 
-# ── Step 10: primary_ticker ───────────────────────────────────────────────────
-print("Step 10 – Tao cot primary_ticker ...")
+print("Step 10 - Create primary_ticker ...")
 
 def primary_ticker(row):
     for col in ("tickers_widget", "tickers_explicit", "tickers_by_name"):
@@ -154,7 +132,6 @@ def primary_ticker(row):
 
 df["primary_ticker"] = df.apply(primary_ticker, axis=1)
 
-# ── Select & reorder columns ──────────────────────────────────────────────────
 KEEP_COLS = [
     "id", "url", "date", "time", "datetime",
     "title", "sapo", "text", "body",
@@ -164,26 +141,24 @@ KEEP_COLS = [
 keep = [c for c in KEEP_COLS if c in df.columns]
 df = df[keep].copy()
 
-# ── Write parquet ─────────────────────────────────────────────────────────────
 OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 df.to_parquet(OUT_FILE, index=False, engine="pyarrow")
-print(f"\n==> Ghi xong: {OUT_FILE}  ({len(df):,} dong)")
+print(f"\n==> Written: {OUT_FILE}  ({len(df):,} rows)")
 
-# ── Summary statistics ────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 print("SUMMARY")
 print("=" * 60)
 
-print("\nSo dong con lai sau moi buoc:")
+print("\nRow counts after each step:")
 for label, count in step_counts:
     print(f"  {label:40s}: {count:>8,}")
 
 macro_rate = df["is_macro"].mean()
 ticker_rate = 1.0 - macro_rate
-print(f"\nTy le is_macro : {macro_rate:.1%}")
-print(f"Ty le co ticker: {ticker_rate:.1%}")
+print(f"\nMacro rate  : {macro_rate:.1%}")
+print(f"Ticker rate : {ticker_rate:.1%}")
 
-print("\nPhan bo n_tickers (value_counts):")
+print("\nn_tickers distribution:")
 vc = df["n_tickers"].value_counts().sort_index()
 print(vc.to_string())
 
@@ -191,22 +166,20 @@ print("\nTop 20 primary_ticker:")
 top20 = df["primary_ticker"].dropna().value_counts().head(20)
 print(top20.to_string())
 
-# ── PASS / FAIL ───────────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 PASS = True
 if len(df) < 15_000:
-    print(f"FAIL: chi co {len(df):,} dong (yeu cau >= 15,000)")
+    print(f"FAIL: only {len(df):,} rows (requires >= 15,000)")
     PASS = False
 else:
-    print(f"PASS: {len(df):,} dong >= 15,000")
+    print(f"PASS: {len(df):,} rows >= 15,000")
 
 if ticker_rate < 0.30:
-    print(f"FAIL: ty le co ticker = {ticker_rate:.1%} (yeu cau >= 30%)")
+    print(f"FAIL: ticker rate = {ticker_rate:.1%} (requires >= 30%)")
     PASS = False
 else:
-    print(f"PASS: ty le co ticker = {ticker_rate:.1%} >= 30%")
+    print(f"PASS: ticker rate = {ticker_rate:.1%} >= 30%")
 
-# ── Write docs/data_quality.md ────────────────────────────────────────────────
 DOCS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 with open(DOCS_FILE, "w", encoding="utf-8") as fh:
@@ -216,40 +189,40 @@ with open(DOCS_FILE, "w", encoding="utf-8") as fh:
     fh.write(f"**Output:** `data/interim/articles_clean.parquet`\n\n")
     fh.write("---\n\n")
 
-    fh.write("## So dong con lai sau moi buoc\n\n")
-    fh.write("| Buoc | So dong |\n")
+    fh.write("## Row counts after each step\n\n")
+    fh.write("| Step | Rows |\n")
     fh.write("|------|--------:|\n")
     for label, count in step_counts:
         fh.write(f"| {label} | {count:,} |\n")
     fh.write("\n")
 
-    fh.write("## Ty le macro / co ticker\n\n")
-    fh.write("| Chi so | Gia tri |\n")
+    fh.write("## Macro / ticker rate\n\n")
+    fh.write("| Metric | Value |\n")
     fh.write("|--------|--------:|\n")
-    fh.write(f"| Ty le is_macro | {macro_rate:.2%} |\n")
-    fh.write(f"| Ty le co ticker | {ticker_rate:.2%} |\n")
+    fh.write(f"| Macro rate | {macro_rate:.2%} |\n")
+    fh.write(f"| Ticker rate | {ticker_rate:.2%} |\n")
     fh.write("\n")
 
-    fh.write("## Phan bo n_tickers\n\n")
-    fh.write("| n_tickers | So bai |\n")
+    fh.write("## n_tickers distribution\n\n")
+    fh.write("| n_tickers | Count |\n")
     fh.write("|----------:|-------:|\n")
     for idx, cnt in vc.items():
         fh.write(f"| {idx} | {cnt:,} |\n")
     fh.write("\n")
 
     fh.write("## Top 20 primary_ticker\n\n")
-    fh.write("| Ticker | So bai |\n")
+    fh.write("| Ticker | Count |\n")
     fh.write("|--------|-------:|\n")
     for ticker, cnt in top20.items():
         fh.write(f"| {ticker} | {cnt:,} |\n")
     fh.write("\n")
 
     status = "PASS" if PASS else "FAIL"
-    fh.write(f"## Ket qua kiem tra\n\n**{status}**\n\n")
-    fh.write(f"- So dong output: **{len(df):,}** (yeu cau >= 15,000)\n")
-    fh.write(f"- Ty le co ticker: **{ticker_rate:.2%}** (yeu cau >= 30%)\n")
+    fh.write(f"## Check result\n\n**{status}**\n\n")
+    fh.write(f"- Output rows: **{len(df):,}** (requires >= 15,000)\n")
+    fh.write(f"- Ticker rate: **{ticker_rate:.2%}** (requires >= 30%)\n")
 
-print(f"\nBao cao: {DOCS_FILE}")
+print(f"\nReport: {DOCS_FILE}")
 print("=" * 60)
 
 if not PASS:

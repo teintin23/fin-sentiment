@@ -1,17 +1,3 @@
-"""
-train_baseline.py
------------------
-Baseline TF-IDF + Logistic Regression cho phân loại sentiment 3 lớp.
-
-Điểm cần lưu ý khi đọc kết quả: test set của dataset này gồm 810 bài, trong đó
-788 bài do trợ lý gán tay và 22 bài do người gán, không có bài nào mang nhãn
-`weak_model`. Vì vậy con số trên test đáng tin hơn hẳn so với train (89% là
-nhãn lan truyền). Script in riêng kết quả trên nhóm `source_detail == "human"`.
-
-Usage:
-    python src/train_baseline.py
-"""
-
 from __future__ import annotations
 
 import io
@@ -48,17 +34,16 @@ C_GRID = [0.1, 0.5, 1.0, 3.0, 10.0]
 
 
 def tokenize_all(df_all: pd.DataFrame) -> dict[str, str]:
-    """Tách từ tiếng Việt bằng underthesea, cache lại vì bước này chậm."""
     cache: dict[str, str] = {}
     if CACHE.exists():
         c = pd.read_parquet(CACHE)
         cache = dict(zip(c["id"].astype(str), c["tok"]))
-        print(f"  cache: {len(cache):,} bai da tach tu truoc do")
+        print(f"  cache: {len(cache):,} articles already tokenized")
 
     need = df_all[~df_all["id"].astype(str).isin(cache)]
     if len(need):
         from underthesea import word_tokenize
-        print(f"  tach tu {len(need):,} bai moi ...")
+        print(f"  tokenizing {len(need):,} new articles ...")
         t0 = time.time()
         for n, (i, txt) in enumerate(zip(need["id"].astype(str),
                                          need["text_input"].astype(str)), 1):
@@ -68,7 +53,7 @@ def tokenize_all(df_all: pd.DataFrame) -> dict[str, str]:
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame({"id": list(cache), "tok": list(cache.values())}).to_parquet(
             CACHE, index=False)
-        print(f"  xong sau {time.time()-t0:.0f}s, da luu cache")
+        print(f"  done in {time.time()-t0:.0f}s, cache saved")
     return cache
 
 
@@ -106,17 +91,11 @@ def main() -> int:
     for d in (tr, va, te):
         d["tok"] = d["id"].astype(str).map(tok)
 
-    # ---- chon C tren val --------------------------------------------------
     print("\n" + "-" * 68)
-    print("Chon sieu tham so C tren val (macro-F1)")
+    print("Hyperparameter selection on val (macro-F1)")
     print("-" * 68)
-    # Val chua toi 94% nhan `weak_model` do mot mo hinh TF-IDF+LR sinh ra.
-    # Cham diem tren val day du se thuong cho mo hinh nao bat chuoc nhan yeu
-    # gioi nhat chu khong phai mo hinh doc tin gioi nhat. Nen chon C theo
-    # macro-F1 tren rieng phan val co nhan doc tay. Huan luyen van dung tron
-    # train de co C khop voi co du lieu that. Khong dung test o buoc nay.
     vclean = va[va["source_detail"] != "weak_model"]
-    print(f"  tap cham diem: {len(vclean)} bai val co nhan doc tay "
+    print(f"  eval set: {len(vclean)} val articles with hand-read labels "
           f"({dict(vclean.source_detail.value_counts())})")
     rows = []
     for C in C_GRID:
@@ -124,18 +103,17 @@ def main() -> int:
         pv, pc = p.predict(va["tok"]), p.predict(vclean["tok"])
         rows.append({
             "C": C,
-            "macroF1_val_nhan_tay": round(f1_score(vclean["label"], pc, average="macro"), 4),
-            "acc_val_nhan_tay": round(accuracy_score(vclean["label"], pc), 4),
-            "macroF1_val_day_du": round(f1_score(va["label"], pv, average="macro"), 4),
+            "macroF1_val_handread": round(f1_score(vclean["label"], pc, average="macro"), 4),
+            "acc_val_handread": round(accuracy_score(vclean["label"], pc), 4),
+            "macroF1_val_full": round(f1_score(va["label"], pv, average="macro"), 4),
         })
         r = rows[-1]
-        print(f"  C={C:<5} val nhan tay macro-F1={r['macroF1_val_nhan_tay']:.4f}"
-              f"   (val day du: {r['macroF1_val_day_du']:.4f})")
+        print(f"  C={C:<5} val hand-read macro-F1={r['macroF1_val_handread']:.4f}"
+              f"   (val full: {r['macroF1_val_full']:.4f})")
     grid = pd.DataFrame(rows)
-    best_C = float(grid.loc[grid["macroF1_val_nhan_tay"].idxmax(), "C"])
-    print(f"  -> C tot nhat: {best_C}")
+    best_C = float(grid.loc[grid["macroF1_val_handread"].idxmax(), "C"])
+    print(f"  -> best C: {best_C}")
 
-    # ---- fit lai tren train+val, danh gia tren test -----------------------
     full = pd.concat([tr, va])
     pipe = make_pipe(best_C).fit(full["tok"], full["label"])
     pred = pipe.predict(te["tok"])
@@ -154,11 +132,10 @@ def main() -> int:
     plt.figure(figsize=(5.5, 4.5))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
                 xticklabels=LABELS, yticklabels=LABELS, cbar=False)
-    plt.xlabel("Dự đoán"); plt.ylabel("Nhãn thật")
+    plt.xlabel("Predicted"); plt.ylabel("True")
     plt.title(f"Baseline TF-IDF + LR — test (macro-F1={mf1:.3f})")
     plt.tight_layout(); plt.savefig(FIG_DIR / "cm_baseline.png", dpi=140); plt.close()
 
-    # ---- rieng nhom nhan nguoi -------------------------------------------
     hm = te["source_detail"] == "human" if "source_detail" in te else pd.Series(False, index=te.index)
     sub = None
     if hm.sum() > 0:
@@ -166,16 +143,16 @@ def main() -> int:
         sub = {"n": int(hm.sum()),
                "macro_F1": round(f1_score(te.loc[hm, "label"], ph, average="macro"), 4),
                "accuracy": round(accuracy_score(te.loc[hm, "label"], ph), 4)}
-        print(f"Rieng nhom nhan NGUOI trong test (n={sub['n']}): "
+        print(f"Human labels in test (n={sub['n']}): "
               f"macro-F1={sub['macro_F1']:.4f}  acc={sub['accuracy']:.4f}")
 
     MODEL_OUT.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"pipeline": pipe, "best_C": best_C, "labels": LABELS}, MODEL_OUT)
-    print(f"\nDa luu model: {MODEL_OUT}")
+    print(f"\nModel saved: {MODEL_OUT}")
 
     write_doc(grid, best_C, mf1, acc, wf1, rep, cm, top_features(pipe), sub, te, hm)
-    print(f"Da ghi: {DOC}")
-    print(f"\nP2.1 PASS  |  macro-F1 tren test = {mf1:.4f}")
+    print(f"Written: {DOC}")
+    print(f"\nP2.1 PASS  |  macro-F1 on test = {mf1:.4f}")
     return 0
 
 
@@ -184,66 +161,64 @@ def write_doc(grid, best_C, mf1, acc, wf1, rep, cm, feats, sub, te, hm) -> None:
     with DOC.open("w", encoding="utf-8") as f:
         w = f.write
         w("# Baseline — TF-IDF + Logistic Regression\n\n")
-        w("Tách từ bằng `underthesea.word_tokenize`, cache ở "
+        w("Word tokenization via `underthesea.word_tokenize`, cached in "
           "`data/interim/tokenized_cache.parquet`.\n")
-        w("Đặc trưng: TF-IDF 1-2 gram, `min_df=2`, `max_features=50000`, "
-          "`sublinear_tf=True`.\nMô hình: `LogisticRegression(class_weight=\"balanced\", "
+        w("Features: TF-IDF 1-2 gram, `min_df=2`, `max_features=50000`, "
+          "`sublinear_tf=True`.\nModel: `LogisticRegression(class_weight=\"balanced\", "
           "max_iter=2000)`, `random_state=42`.\n\n")
 
-        w("## 1. Chọn siêu tham số trên val\n\n")
+        w("## 1. Hyperparameter selection on val\n\n")
         w(grid.to_markdown(index=False) + "\n\n")
-        w(f"C tốt nhất: **{best_C}**. Fit lại trên train+val rồi đánh giá trên test.\n\n")
-        w("> Val chứa tới 94% nhãn `weak_model` do một mô hình TF-IDF+LR sinh ra.\n"
-          "> Chọn C trên val đầy đủ sẽ thưởng cho mô hình nào bắt chước nhãn yếu giỏi\n"
-          "> nhất chứ không phải mô hình đọc tin giỏi nhất, và đẩy C lên 10 do khớp\n"
-          "> chặt với chính họ mô hình đã sinh ra nhãn. Cột `macroF1_val_nhan_tay` là\n"
-          "> cross-validation 5-fold trên riêng phần nhãn đọc tay của train+val — đây\n"
-          "> mới là tiêu chí chọn. Cột val đầy đủ giữ lại để đối chiếu.\n\n")
+        w(f"Best C: **{best_C}**. Retrained on train+val, evaluated on test.\n\n")
+        w("> Val contains up to 94% `weak_model` labels generated by a TF-IDF+LR model.\n"
+          "> Selecting C on full val rewards the model that best mimics those weak labels,\n"
+          "> not the model that reads news best. Column `macroF1_val_handread` is the\n"
+          "> correct selection criterion. Full val column retained for reference.\n\n")
 
-        w("## 2. Kết quả trên test\n\n")
-        w("| Chỉ số | Giá trị |\n|---|---|\n")
+        w("## 2. Test results\n\n")
+        w("| Metric | Value |\n|---|---|\n")
         w(f"| macro-F1 | **{mf1:.4f}** |\n| accuracy | {acc:.4f} |\n"
           f"| weighted-F1 | {wf1:.4f} |\n\n")
 
         w("## 3. Classification report\n\n```\n" + rep + "```\n\n")
 
         w("## 4. Confusion matrix\n\n")
-        w("Hàng = nhãn thật, cột = dự đoán.\n\n")
+        w("Rows = true labels, columns = predicted.\n\n")
         w("| | " + " | ".join(LABELS) + " |\n|---|" + "---|" * len(LABELS) + "\n")
         for i, lb in enumerate(LABELS):
             w(f"| **{lb}** | " + " | ".join(str(x) for x in cm[i]) + " |\n")
         w("\n![confusion matrix](../reports/figures/cm_baseline.png)\n\n")
 
-        w("## 5. Từ khóa mô hình học được\n\n")
+        w("## 5. Top features learned by the model\n\n")
         for cls, items in feats.items():
-            w(f"**{cls}** — 20 đặc trưng trọng số cao nhất:\n\n")
+            w(f"**{cls}** — 20 features with highest weight:\n\n")
             w("`" + "`, `".join(t for t, _ in items) + "`\n\n")
 
-        w("## 6. Kết quả riêng trên phần nhãn người\n\n")
+        w("## 6. Results on human-labeled subset\n\n")
         if sub:
-            w(f"Test có **{sub['n']}** bài mang nhãn do người gán "
+            w(f"Test has **{sub['n']}** articles with human labels "
               f"(`source_detail == \"human\"`).\n\n")
             w(f"- macro-F1: **{sub['macro_F1']:.4f}**\n- accuracy: {sub['accuracy']:.4f}\n\n")
-            w("Cỡ mẫu nhỏ nên khoảng tin cậy rất rộng, chỉ dùng để đối chiếu định tính.\n\n")
+            w("Small sample size; confidence intervals are wide. Use for qualitative comparison only.\n\n")
         else:
-            w("Không có nhãn người trong test.\n\n")
+            w("No human labels in test set.\n\n")
 
         if "source_detail" in te:
-            w("### Thành phần nguồn nhãn của test set\n\n")
+            w("### Label source breakdown in test set\n\n")
             vc = te["source_detail"].value_counts()
-            w("| Nguồn | Số bài |\n|---|---:|\n")
+            w("| Source | Count |\n|---|---:|\n")
             for k, v in vc.items():
                 w(f"| `{k}` | {v} |\n")
-            w("\nTest set không chứa nhãn `weak_model`, toàn bộ là nhãn đọc tay. "
-              "Đây là lý do con số trên test đáng tin hơn train.\n\n")
+            w("\nTest set contains no `weak_model` labels; all labels are hand-read. "
+              "This is why test numbers are more reliable than train.\n\n")
 
-        w("## 7. Hạn chế\n\n")
-        w("- Train chứa ~89% nhãn `weak_model` do mô hình yếu lan truyền, nên trần "
-          "hiệu năng bị giới hạn bởi chất lượng nhãn chứ không phải bởi mô hình.\n")
-        w("- TF-IDF không nắm được phủ định xa và ngữ cảnh, ví dụ *\"không hoàn tất "
-          "giao dịch mua\"* dễ bị đọc thành tín hiệu mua vào.\n")
-        w("- Mô hình không biết `primary_ticker` là chủ thể hay chỉ được nhắc thoáng "
-          "qua, dù ticker có mặt trong `text_input`.\n")
+        w("## 7. Limitations\n\n")
+        w("- Train contains ~89% `weak_model` labels; performance ceiling is set by "
+          "label quality, not model architecture.\n")
+        w("- TF-IDF does not capture long-distance negation, e.g. "
+          "*\"failed to complete the acquisition\"* may look like a positive signal.\n")
+        w("- Model does not know whether `primary_ticker` is the subject of the article "
+          "or only mentioned in passing, even though the ticker appears in `text_input`.\n")
 
 
 if __name__ == "__main__":

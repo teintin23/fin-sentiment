@@ -1,21 +1,3 @@
-"""
-audit_gold.py
--------------
-Soát lại nhãn người trong gold_seed_v2.csv tại những chỗ bất đồng với nhãn máy.
-
-Lý do tồn tại: kappa giữa người và máy tụt xuống 0.55, nhưng tách theo cột
-``reused`` thì thấy phần nhãn cũ đạt 0.69 còn phần nhãn mới chỉ 0.36 và có tới
-70% là POSITIVE. Đó là dấu hiệu trôi tiêu chí trong phiên gán nhãn gần nhất chứ
-không phải máy gán sai. Script này lọc ra đúng những dòng cần đọc lại.
-
-Đầu ra: data/interim/gold_recheck.csv, sắp xếp theo mức đáng ngờ giảm dần.
-Cột `label_suggest` là gợi ý, KHÔNG tự ghi đè. Người quyết định.
-
-Usage:
-    python src/audit_gold.py                 # sinh file soát lại
-    python src/audit_gold.py --apply FILE    # nạp lại file đã sửa vào gold_seed_v2
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -49,33 +31,32 @@ def build() -> int:
     dis["rule"] = dis["text_input"].map(lambda t: rule_label(str(t)) or "")
     dis["lex_net"] = dis["text_input"].map(lambda t: round(score_text(str(t))["lex_net"], 2))
 
-    # mức đáng ngờ: máy càng chắc chắn + luật từ điển cũng đồng ý với máy
-    dis["nghi_ngo"] = (
+    dis["suspicion"] = (
         dis["confidence"]
         + 0.35 * (dis["rule"] == dis["label_machine"])
         + 0.25 * (dis["label_source"] == "claude_manual")
-        + 0.20 * (~dis["reused"].astype(bool))       # nhãn mới trôi nhiều hơn
+        + 0.20 * (~dis["reused"].astype(bool))
     ).round(3)
 
     dis["label_suggest"] = dis["label_machine"]
-    dis["label_final"] = ""      # cột để người điền
-    dis = dis.sort_values("nghi_ngo", ascending=False)
+    dis["label_final"] = ""
+    dis = dis.sort_values("suspicion", ascending=False)
 
     cols = ["id", "primary_ticker", "date", "reused", "title", "sapo", "url",
             "label_human", "label_machine", "rule", "confidence", "lex_net",
-            "nghi_ngo", "label_suggest", "label_final"]
+            "suspicion", "label_suggest", "label_final"]
     dis[cols].to_csv(OUT, index=False, encoding="utf-8-sig")
 
-    print(f"Bat dong: {len(dis)}/{len(m)} bai  ({len(dis)/len(m):.1%})")
-    print(f"  trong do nhan MOI (reused=False): {int((~dis['reused'].astype(bool)).sum())}")
-    print(f"  trong do nhan CU  (reused=True) : {int(dis['reused'].astype(bool).sum())}")
-    print("\nKieu bat dong pho bien:")
+    print(f"Disagreements: {len(dis)}/{len(m)} ({len(dis)/len(m):.1%})")
+    print(f"  new labels (reused=False): {int((~dis['reused'].astype(bool)).sum())}")
+    print(f"  old labels (reused=True) : {int(dis['reused'].astype(bool).sum())}")
+    print("\nTop disagreement patterns:")
     pat = (dis["label_human"] + " -> " + dis["label_machine"]).value_counts()
     for k, v in pat.items():
-        print(f"  nguoi={k.split(' -> ')[0]:9s} may={k.split(' -> ')[1]:9s} {v:3d} bai")
-    print(f"\nDa ghi {OUT}")
-    print("Mo file, doc cot title/sapo, dien POSITIVE/NEUTRAL/NEGATIVE vao cot label_final")
-    print("(de trong = giu nguyen nhan nguoi hien tai), roi chay:")
+        print(f"  human={k.split(' -> ')[0]:9s} machine={k.split(' -> ')[1]:9s} {v:3d}")
+    print(f"\nWritten {OUT}")
+    print("Open file, read title/sapo, fill POSITIVE/NEUTRAL/NEGATIVE in label_final")
+    print("(leave blank = keep current human label), then run:")
     print(f"  python src/audit_gold.py --apply {OUT.name}")
     return 0
 
@@ -85,7 +66,7 @@ def apply(fname: str) -> int:
     rec = pd.read_csv(path, encoding="utf-8-sig")
     rec = rec[rec["label_final"].isin(LABELS)]
     if rec.empty:
-        print("Khong co dong nao dien label_final. Khong thay doi gi.")
+        print("No rows with label_final filled. No changes.")
         return 0
 
     gold = pd.read_csv(GOLD, encoding="utf-8-sig")
@@ -97,13 +78,13 @@ def apply(fname: str) -> int:
     bak = GOLD.with_suffix(".csv.bak")
     pd.read_csv(GOLD, encoding="utf-8-sig").to_csv(bak, index=False, encoding="utf-8-sig")
     gold.to_csv(GOLD, index=False, encoding="utf-8-sig")
-    print(f"Da cap nhat {n} nhan trong gold_seed_v2.csv (ban cu luu o {bak.name})")
-    print("Chay lai: python src/eval_labels.py")
+    print(f"Updated {n} labels in gold_seed_v2.csv (backup saved as {bak.name})")
+    print("Run: python src/eval_labels.py")
     return 0
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--apply", metavar="FILE", help="nap file da sua vao gold_seed_v2")
+    ap.add_argument("--apply", metavar="FILE", help="load corrected file into gold_seed_v2")
     a = ap.parse_args()
     sys.exit(apply(a.apply) if a.apply else build())

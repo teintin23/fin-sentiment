@@ -1,12 +1,3 @@
-"""
-build_ticker_dict.py
---------------------
-Sinh whitelist mã cổ phiếu (data/tickers.txt) và từ điển tên công ty
-(data/company_names.json) từ vnstock.
-
-Yêu cầu: vnstock >= 4.0.6 (dùng vnstock.api mới, không dùng class Vnstock cũ)
-"""
-
 import io
 import sys
 import re
@@ -16,7 +7,6 @@ from pathlib import Path
 
 import pandas as pd
 
-# --- Đảm bảo stdout/stderr là UTF-8 (Windows) --------------------------------
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
@@ -24,7 +14,6 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-# --- Manual brand aliases ----------------------------------------------------
 MANUAL_DICT: dict = {
     "VCB": ["Vietcombank"],
     "CTG": ["VietinBank"],
@@ -40,8 +29,8 @@ MANUAL_DICT: dict = {
     "VNM": ["Vinamilk"],
     "SAB": ["Sabeco"],
     "VJC": ["Vietjet"],
-    "MWG": ["The Gioi Di Dong", "Th\u1ebf Gi\u1edbi Di \u0110\u1ed9ng"],
-    "HPG": ["Ho\u00e0 Ph\u00e1t", "Hoa Phat"],
+    "MWG": ["The Gioi Di Dong", "Thế Giới Di Động"],
+    "HPG": ["Hoà Phát", "Hoa Phat"],
     "HSG": ["Hoa Sen"],
     "GAS": ["PV GAS"],
     "PLX": ["Petrolimex"],
@@ -51,11 +40,11 @@ MANUAL_DICT: dict = {
     "VCG": ["Vinaconex"],
     "GEX": ["Gelex"],
     "GEE": ["GELEX Electric"],
-    "HDG": ["H\u00e0 \u0110\u00f4", "Ha Do"],
+    "HDG": ["Hà Đô", "Ha Do"],
     "VND": ["VNDirect"],
-    "POM": ["Th\u00e9p Pomina", "Thep Pomina", "Pomina"],
-    "QCG": ["Qu\u1ed1c C\u01b0\u1eddng Gia Lai", "Quoc Cuong Gia Lai"],
-    "HAG": ["Ho\u00e0ng Anh Gia Lai", "Hoang Anh Gia Lai", "HAGL"],
+    "POM": ["Thép Pomina", "Thep Pomina", "Pomina"],
+    "QCG": ["Quốc Cường Gia Lai", "Quoc Cuong Gia Lai"],
+    "HAG": ["Hoàng Anh Gia Lai", "Hoang Anh Gia Lai", "HAGL"],
     "NVL": ["Novaland"],
     "VHM": ["Vinhomes"],
     "VIC": ["Vingroup"],
@@ -63,53 +52,49 @@ MANUAL_DICT: dict = {
     "FRT": ["FPT Retail"],
 }
 
-# --- Tiền tố pháp lý cần bỏ --------------------------------------------------
 LEGAL_PREFIXES = [
-    r"c\u00f4ng ty c\u1ed5 ph\u1ea7n",
+    r"công ty cổ phần",
     r"ctcp",
-    r"ng\u00e2n h\u00e0ng th\u01b0\u01a1ng m\u1ea1i c\u1ed5 ph\u1ea7n",
-    r"ng\u00e2n h\u00e0ng tmcp",
-    r"ng\u00e2n h\u00e0ng",
-    r"t\u1ed5ng c\u00f4ng ty c\u1ed5 ph\u1ea7n",
-    r"t\u1ed5ng c\u00f4ng ty",
-    r"t\u1eadp \u0111o\u00e0n",
-    r"c\u00f4ng ty tnhh",
-    r"c\u00f4ng ty",
+    r"ngân hàng thương mại cổ phần",
+    r"ngân hàng tmcp",
+    r"ngân hàng",
+    r"tổng công ty cổ phần",
+    r"tổng công ty",
+    r"tập đoàn",
+    r"công ty tnhh",
+    r"công ty",
     r"tnhh",
 ]
 
-# --- Cụm từ chung chung cần loại ---------------------------------------------
 GENERIC_LOWER = {
-    "\u0111\u1ea7u t\u01b0",
-    "ph\u00e1t tri\u1ec3n",
-    "x\u00e2y d\u1ef1ng",
-    "th\u01b0\u01a1ng m\u1ea1i",
-    "d\u1ecbch v\u1ee5",
-    "vi\u1ec7t nam",
+    "đầu tư",
+    "phát triển",
+    "xây dựng",
+    "thương mại",
+    "dịch vụ",
+    "việt nam",
     "viet nam",
     "vietnam",
-    "ch\u1ee9ng kho\u00e1n",
-    "b\u1ea5t \u0111\u1ed9ng s\u1ea3n",
+    "chứng khoán",
+    "bất động sản",
     "bat dong san",
-    "s\u1ea3n xu\u1ea5t",
+    "sản xuất",
     "kinh doanh",
-    "t\u01b0 v\u1ea5n",
-    "qu\u1ea3n l\u00fd",
-    "\u0111\u1ea7u t\u01b0 ph\u00e1t tri\u1ec3n",
-    "\u0111\u1ea7u t\u01b0 x\u00e2y d\u1ef1ng",
-    "\u0111\u1ea7u t\u01b0 th\u01b0\u01a1ng m\u1ea1i",
-    "th\u01b0\u01a1ng m\u1ea1i d\u1ecbch v\u1ee5",
-    "x\u00e2y d\u1ef1ng th\u01b0\u01a1ng m\u1ea1i",
+    "tư vấn",
+    "quản lý",
+    "đầu tư phát triển",
+    "đầu tư xây dựng",
+    "đầu tư thương mại",
+    "thương mại dịch vụ",
+    "xây dựng thương mại",
 }
 
 
 def normalize_vi(text: str) -> str:
-    """Chuẩn hoá tiếng Việt: NFC, strip."""
     return unicodedata.normalize("NFC", text.strip())
 
 
 def remove_legal_prefix(name: str) -> str:
-    """Bỏ tiền tố pháp lý ở đầu tên (case-insensitive), trả về lowercase."""
     s = unicodedata.normalize("NFC", name.strip().lower())
     for prefix in LEGAL_PREFIXES:
         pattern = r"^" + prefix + r"[\s\-\u2013\u2014:]*"
@@ -121,17 +106,14 @@ def remove_legal_prefix(name: str) -> str:
 
 
 def title_case_vi(text: str) -> str:
-    """Viết hoa chữ đầu mỗi từ."""
     return " ".join(w.capitalize() for w in text.split())
 
 
 def is_generic(alias_lower: str) -> bool:
-    """Kiểm tra alias có phải cụm chung chung không."""
     return alias_lower in GENERIC_LOWER
 
 
 def make_accent_variants(alias: str) -> list:
-    """Trả về [alias, no_accent_variant] nếu có dấu."""
     variants = [alias]
     no_accent = unicodedata.normalize("NFD", alias)
     no_accent = "".join(c for c in no_accent if unicodedata.category(c) != "Mn")
@@ -142,12 +124,11 @@ def make_accent_variants(alias: str) -> list:
 
 
 def build_aliases_from_name(organ_name: str) -> list:
-    """Sinh alias từ tên đầy đủ của công ty."""
     if not isinstance(organ_name, str) or not organ_name.strip():
         return []
 
     name = normalize_vi(organ_name)
-    core = remove_legal_prefix(name)  # lowercase
+    core = remove_legal_prefix(name)
 
     if not core or len(core) < 4:
         return []
@@ -161,15 +142,10 @@ def build_aliases_from_name(organ_name: str) -> list:
 
 
 def fetch_listing_df() -> pd.DataFrame:
-    """
-    Thử lần lượt các method của Listing() cho tới khi có DataFrame >100 dòng.
-    In tên method và list columns.
-    """
     from vnstock.api.listing import Listing
 
     listing = Listing()
 
-    # method_name, call_kwargs
     methods_to_try = [
         ("all_symbols", {}),
         ("symbols_by_exchange", {"exchange": "ALL"}),
@@ -180,7 +156,7 @@ def fetch_listing_df() -> pd.DataFrame:
 
     for method_name, kwargs in methods_to_try:
         if not hasattr(listing, method_name):
-            print(f"[SKIP] Method '{method_name}' không tồn tại.")
+            print(f"[SKIP] Method '{method_name}' does not exist.")
             continue
 
         label = method_name + (f"({kwargs})" if kwargs else "()")
@@ -190,16 +166,16 @@ def fetch_listing_df() -> pd.DataFrame:
             df = method(**kwargs) if kwargs else method()
 
             if not isinstance(df, pd.DataFrame):
-                print(f"  -> Không phải DataFrame (type={type(df)}), bỏ qua.")
+                print(f"  -> Not a DataFrame (type={type(df)}), skipping.")
                 continue
 
             print(f"  OK  Rows={len(df)}, Columns={list(df.columns)}")
 
             if len(df) > 100:
-                print(f"  => Dùng: {label}  ({len(df)} dòng)\n")
+                print(f"  => Using: {label}  ({len(df)} rows)\n")
                 return df
             else:
-                print(f"  -> Chỉ {len(df)} dòng, thử method khác...")
+                print(f"  -> Only {len(df)} rows, trying next method...")
 
         except Exception:
             import traceback
@@ -207,13 +183,12 @@ def fetch_listing_df() -> pd.DataFrame:
             traceback.print_exc()
 
     raise RuntimeError(
-        "Không có method nào trả về DataFrame >100 dòng.\n"
-        "Kiểm tra kết nối mạng hoặc API vnstock."
+        "No method returned a DataFrame with >100 rows.\n"
+        "Check network connection or vnstock API."
     )
 
 
 def detect_columns(df: pd.DataFrame):
-    """Tự dò cột mã và cột tên. Trả về (ticker_col, name_col)."""
     ticker_candidates = ["symbol", "ticker", "code", "stockCode", "stock_code"]
     name_candidates = [
         "organ_name", "organName",
@@ -227,7 +202,7 @@ def detect_columns(df: pd.DataFrame):
 
     if ticker_col is None:
         raise ValueError(
-            f"Không tìm được cột mã trong DataFrame. "
+            f"Cannot find ticker column in DataFrame. "
             f"Columns: {list(df.columns)}"
         )
 
@@ -240,28 +215,23 @@ def main() -> None:
     print("  BUILD TICKER DICT  (vnstock API)")
     print("=" * 60)
 
-    # 1. Lấy dữ liệu -----------------------------------------------------------
     df = fetch_listing_df()
 
-    # 2. Lưu raw ---------------------------------------------------------------
     raw_path = DATA_DIR / "listing_raw.csv"
     df.to_csv(raw_path, index=False, encoding="utf-8-sig")
-    print(f"[SAVE] listing_raw.csv  ({len(df)} dòng) -> {raw_path}")
+    print(f"[SAVE] listing_raw.csv  ({len(df)} rows) -> {raw_path}")
 
-    # 3. Dò cột ----------------------------------------------------------------
     ticker_col, name_col = detect_columns(df)
 
-    # 4. Lọc mã ^[A-Z]{3}$ ----------------------------------------------------
     tickers_raw = df[ticker_col].dropna().astype(str).str.strip().str.upper()
     valid_tickers = sorted({t for t in tickers_raw if re.match(r"^[A-Z]{3}$", t)})
 
     ticker_path = DATA_DIR / "tickers.txt"
     ticker_path.write_text("\n".join(valid_tickers) + "\n", encoding="utf-8")
-    print(f"[SAVE] tickers.txt  ({len(valid_tickers)} mã) -> {ticker_path}")
+    print(f"[SAVE] tickers.txt  ({len(valid_tickers)} tickers) -> {ticker_path}")
 
-    # 5. Xây dựng alias từ tên công ty -----------------------------------------
-    alias_to_tickers: dict = {}   # alias_lower -> [ticker, ...]
-    ticker_to_aliases: dict = {}  # ticker -> set[alias]
+    alias_to_tickers: dict = {}
+    ticker_to_aliases: dict = {}
 
     if name_col:
         for _, row in df.iterrows():
@@ -274,9 +244,8 @@ def main() -> None:
                 alias_to_tickers.setdefault(a.lower(), []).append(ticker)
                 ticker_to_aliases.setdefault(ticker, set()).add(a)
 
-        # Loại alias trùng nhiều mã
         ambiguous = {a for a, ts in alias_to_tickers.items() if len(ts) > 1}
-        print(f"[INFO] Aliases bị loại do trùng mã: {len(ambiguous)}")
+        print(f"[INFO] Aliases removed (ambiguous, matched multiple tickers): {len(ambiguous)}")
 
         for ticker in ticker_to_aliases:
             ticker_to_aliases[ticker] = {
@@ -284,7 +253,6 @@ def main() -> None:
                 if a.lower() not in ambiguous
             }
 
-    # 6. Merge manual dict -----------------------------------------------------
     company_names: dict = {}
 
     for ticker in valid_tickers:
@@ -296,28 +264,26 @@ def main() -> None:
         if aliases:
             company_names[ticker] = sorted(aliases)
 
-    # 7. Ghi JSON --------------------------------------------------------------
     json_path = DATA_DIR / "company_names.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(company_names, f, indent=1, ensure_ascii=False)
-    print(f"[SAVE] company_names.json  ({len(company_names)} mã) -> {json_path}")
+    print(f"[SAVE] company_names.json  ({len(company_names)} tickers) -> {json_path}")
 
-    # 8. Kết quả cuối ----------------------------------------------------------
     print()
     print("=" * 60)
-    print(f"  TICKERS : {len(valid_tickers):>5}  (PASS nếu >= 500)")
-    print(f"  COMPANIES: {len(company_names):>5}  (PASS nếu >= 300)")
+    print(f"  TICKERS : {len(valid_tickers):>5}  (PASS if >= 500)")
+    print(f"  COMPANIES: {len(company_names):>5}  (PASS if >= 300)")
     print("=" * 60)
 
     if len(valid_tickers) >= 500:
         print("[PASS] tickers.txt OK")
     else:
-        print(f"[FAIL] tickers.txt chỉ có {len(valid_tickers)} mã")
+        print(f"[FAIL] tickers.txt only has {len(valid_tickers)} tickers")
 
     if len(company_names) >= 300:
         print("[PASS] company_names.json OK")
     else:
-        print(f"[FAIL] company_names.json chỉ có {len(company_names)} mã")
+        print(f"[FAIL] company_names.json only has {len(company_names)} tickers")
 
 
 if __name__ == "__main__":
