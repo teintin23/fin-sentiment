@@ -107,10 +107,6 @@ python src/event_study_momentum.py # hồi quy có kiểm soát momentum + post-
 python src/build_docs.py           # sinh lại README và các card
 ```
 
-## Trên HuggingFace
-
-- Dataset: `<username>/vn-fin-sentiment` (chưa đẩy)
-- Model: `<username>/phobert-vn-fin-sentiment` (chưa đẩy)
 
 ## Quyết định thiết kế
 

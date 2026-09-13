@@ -111,7 +111,7 @@ All content is published financial news. Named individuals appear only in their 
   title  = {vn-fin-sentiment: Ticker-level sentiment for Vietnamese financial news},
   author = {<Your Name>},
   year   = {2026},
-  url    = {https://huggingface.co/datasets/<username>/vn-fin-sentiment}
+  url    = {https://github.com/<username>/vn-fin-sentiment}
 }
 ```
 

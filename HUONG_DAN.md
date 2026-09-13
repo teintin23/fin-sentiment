@@ -7,8 +7,8 @@ Giải nén zip này, rồi copy đè toàn bộ vào thư mục repo `fin-senti
 ## 2. Commit + push
 ```
 cd fin-sentiment
-git add README.md src/build_docs.py src/event_study_momentum.py src/push_hf.py docs/event_study_momentum.md docs/research_summary.md
-git commit -m "Add momentum-controlled event study, research summary, HF push script"
+git add README.md src/build_docs.py src/event_study_momentum.py docs/event_study_momentum.md docs/research_summary.md
+git commit -m "Add momentum-controlled event study, research summary"
 git push
 ```
 
@@ -20,16 +20,7 @@ Description:
 
 Topics: `vietnamese` `nlp` `sentiment-analysis` `finance` `phobert` `event-study` `dataset`
 
-## 4. Đẩy HuggingFace (nửa ngày công, giá trị lớn nhất còn lại)
-```
-pip install huggingface_hub datasets
-huggingface-cli login          # token Write, lấy ở hf.co/settings/tokens
-python src/push_hf.py --user TEN_HF_CUA_BAN
-# nếu có sẵn models/phobert-vnfin/ trên máy thì thêm --with-model
-```
-Xong sửa 2 dòng "chưa đẩy" trong README bằng link thật, commit lần nữa.
-
-## 5. Kiểm tra lại (không bắt buộc)
+## 4. Kiểm tra lại (không bắt buộc)
 Muốn tự tái tạo số liệu momentum trên máy:
 ```
 pip install statsmodels

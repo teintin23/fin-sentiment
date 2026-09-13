@@ -199,10 +199,6 @@ def write_readme(kappa, base_f1, pho_f1, pval, tbl, src, full, splits,
     a("python src/build_docs.py           # regenerate README and cards")
     a("```\n")
 
-    a("## HuggingFace\n")
-    a("- Dataset: `<username>/vn-fin-sentiment` (not yet pushed)")
-    a("- Model: `<username>/phobert-vn-fin-sentiment` (not yet pushed)\n")
-
     a("## Design decisions\n")
     a("| Decision | Rationale |")
     a("|---|---|")
@@ -350,7 +346,7 @@ def write_dataset_card(kappa, base_f1, pho_f1, pval, tbl, src, full, splits) -> 
     a("## Citation\n")
     a("```bibtex\n@misc{vnfinsentiment,\n  title  = {vn-fin-sentiment: Ticker-level "
       "sentiment for Vietnamese financial news},\n  author = {<Your Name>},\n"
-      "  year   = {2026},\n  url    = {https://huggingface.co/datasets/<username>/"
+      "  year   = {2026},\n  url    = {https://github.com/<username>/"
       "vn-fin-sentiment}\n}\n```\n")
 
     (DOCS / "dataset_card.md").write_text("\n".join(w) + "\n", encoding="utf-8")
